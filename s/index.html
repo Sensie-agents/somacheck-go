@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <title>SomaCheck - A statement to feel into</title>
+  <meta name="description" content="See what your body knows about any statement in one gesture.">
+  <meta property="og:title" content="SomaCheck - A statement to feel into">
+  <meta property="og:description" content="See what your body knows about any statement in one gesture.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --cream: #FBF6EE;
+      --sage: #405340;
+      --dark-brown: #261D16;
+      --emerald: #12A594;
+      --amber: #F4B26B;
+      --bg: #FBF6EE;
+      --surface: #FFFFFF;
+      --text: #261D16;
+      --muted: #5C5047;
+      --accent: #12A594;
+      --accent-hover: #0E8576;
+      --amber-bg: #F4B26B;
+      --ring: rgba(18, 165, 148, 0.18);
+      --shadow: 0 24px 64px rgba(38, 29, 22, 0.12);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      min-height: 100dvh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 16px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      width: 100%;
+      max-width: 440px;
+      background: var(--surface);
+      border-radius: 28px;
+      padding: 40px 32px 36px;
+      box-shadow: var(--shadow);
+      text-align: center;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 28px;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--sage);
+    }
+    .brand-mark {
+      width: 18px;
+      height: 18px;
+      border: 2.5px solid var(--emerald);
+      border-radius: 50%;
+      display: inline-grid;
+      place-items: center;
+    }
+    .brand-mark::after {
+      content: "";
+      width: 6px;
+      height: 6px;
+      background: var(--amber);
+      border-radius: 50%;
+    }
+    .badge {
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: var(--ring);
+      color: var(--emerald);
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 18px;
+    }
+    .statement {
+      font-size: 24px;
+      font-weight: 600;
+      line-height: 1.35;
+      margin-bottom: 8px;
+    }
+    .statement::before { content: open-quote; color: var(--emerald); }
+    .statement::after { content: close-quote; color: var(--emerald); }
+    .hint {
+      font-size: 15px;
+      color: var(--muted);
+      margin-bottom: 28px;
+    }
+    .actions { display: flex; flex-direction: column; gap: 12px; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      padding: 17px 24px;
+      border-radius: 16px;
+      font-size: 17px;
+      font-weight: 600;
+      text-decoration: none;
+      text-align: center;
+      border: none;
+      cursor: pointer;
+      transition: transform 0.08s ease, background 0.15s ease;
+    }
+    .btn:active { transform: scale(0.985); }
+    .btn-primary {
+      background: var(--accent);
+      color: #FFFFFF;
+    }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-secondary {
+      background: transparent;
+      color: var(--text);
+      border: 1.5px solid rgba(38, 29, 22, 0.16);
+    }
+    .btn-secondary:hover { background: rgba(38, 29, 22, 0.04); }
+    .apple-logo {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+    }
+    .footer {
+      margin-top: 28px;
+      font-size: 12px;
+      color: #8A7F73;
+      line-height: 1.5;
+    }
+    .footer a { color: var(--sage); text-decoration: underline; }
+    .verdict {
+      margin-top: 24px;
+      padding: 20px;
+      border-radius: 20px;
+      background: var(--cream);
+      border: 1px solid rgba(64, 83, 64, 0.12);
+      display: none;
+    }
+    .verdict.visible { display: block; }
+    .verdict-label {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--sage);
+      margin-bottom: 8px;
+    }
+    .verdict-value {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .verdict-value.aligned { color: var(--emerald); }
+    .verdict-value.unaligned { color: #C45B4A; }
+    .verdict-confidence {
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .state-loading .content { display: none; }
+    .state-loaded .loader { display: none; }
+    .state-error .content, .state-error .loader, .state-error .verdict { display: none; }
+    .state-error .error-msg { display: block; }
+    .loader { display: flex; justify-content: center; margin: 40px 0; }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(18, 165, 148, 0.15);
+      border-top-color: var(--emerald);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error-msg {
+      display: none;
+      margin-top: 28px;
+      padding: 16px;
+      border-radius: 14px;
+      background: #FCEEEC;
+      color: #9A3B2C;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    @media (max-width: 480px) {
+      body { padding: 16px; }
+      .card { padding: 32px 24px 28px; border-radius: 24px; }
+      .statement { font-size: 22px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .spinner { animation: none; }
+      .btn { transition: none; }
+    }
+  </style>
+</head>
+<body class="state-loading">
+  <main class="card">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span> SomaCheck</div>
+    <div class="loader" aria-label="Loading"><div class="spinner"></div></div>
+    <div class="content">
+      <div class="badge" id="status-badge">Shared check-in</div>
+      <blockquote>
+        <p class="statement" id="statement-text">Loading statement…</p>
+      </blockquote>
+      <p class="hint" id="statement-hint">Open SomaCheck to answer this with one gesture. Your body knows.</p>
+      <div class="actions">
+        <a class="btn btn-primary" id="open-app" href="#" rel="noopener">
+          Open in SomaCheck
+        </a>
+        <a class="btn btn-secondary" id="app-store" href="https://apps.apple.com/app/id6792978184" target="_blank" rel="noopener">
+          <svg class="apple-logo" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
+          </svg>
+          Get the App
+        </a>
+      </div>
+      <div class="verdict" id="verdict-card" aria-live="polite">
+        <div class="verdict-label">Result</div>
+        <div class="verdict-value" id="verdict-value">-</div>
+        <div class="verdict-confidence" id="verdict-confidence"></div>
+      </div>
+      <p class="footer">
+        <a id="privacy-link" href="https://www.joinsensie.com/somacheck/privacy/" target="_blank" rel="noopener">Privacy</a>
+        &middot; SomaCheck is a wellbeing tool, not a medical device.
+      </p>
+    </div>
+    <div class="error-msg" id="error-msg" role="alert">
+      This link could not be loaded. It may have expired, or the statement was removed.
+    </div>
+  </main>
+
+  <script>
+    (function() {
+      // Config: set window.SOMACHECK_API_BASE to override (e.g. local mock).
+      var API_BASE = (typeof window !== 'undefined' && window.SOMACHECK_API_BASE) || '';
+      var APP_STORE_ID = '6792978184';
+      var POLL_INTERVAL_MS = 3000;
+
+      var body = document.body;
+      var statementEl = document.getElementById('statement-text');
+      var hintEl = document.getElementById('statement-hint');
+      var badgeEl = document.getElementById('status-badge');
+      var openAppEl = document.getElementById('open-app');
+      var appStoreEl = document.getElementById('app-store');
+      var verdictCard = document.getElementById('verdict-card');
+      var verdictValue = document.getElementById('verdict-value');
+      var verdictConfidence = document.getElementById('verdict-confidence');
+      var errorMsg = document.getElementById('error-msg');
+
+      var pathParts = window.location.pathname.split('/').filter(Boolean);
+      var token = (pathParts.length === 2 && pathParts[0] === 's') ? pathParts[1] : null;
+
+      function setVisibleState(state) {
+        body.className = 'state-' + state;
+      }
+
+      function showError() {
+        setVisibleState('error');
+      }
+
+      function formatVerdict(verdict) {
+        if (!verdict) return '-';
+        return verdict === 'aligned' ? 'Aligned' : 'Unaligned';
+      }
+
+      function renderVerdict(data) {
+        if (!data || data.status !== 'answered' || !data.verdict) return;
+        verdictValue.textContent = formatVerdict(data.verdict);
+        verdictValue.className = 'verdict-value ' + data.verdict;
+        var confidence = typeof data.confidence === 'number' ? Math.round(data.confidence * 100) + '% confidence' : '';
+        verdictConfidence.textContent = confidence;
+        verdictCard.classList.add('visible');
+        badgeEl.textContent = 'Answered';
+        hintEl.textContent = 'This statement has been answered.';
+        openAppEl.textContent = 'View in SomaCheck';
+      }
+
+      function buildShareUrl(token) {
+        return API_BASE + '/v0/statements/' + encodeURIComponent(token) + '/share';
+      }
+
+      function buildDeeplink(token) {
+        return 'somacheck://s/' + encodeURIComponent(token);
+      }
+
+      function buildUniversalLink(token) {
+        return 'https://somacheck.com/s/' + encodeURIComponent(token);
+      }
+
+      function buildAppStoreUrl(token) {
+        var url = 'https://apps.apple.com/app/id' + APP_STORE_ID;
+        if (token) {
+          // Deferred deeplink hint for attribution after install.
+          url += '?pt=' + encodeURIComponent(token);
+        }
+        return url;
+      }
+
+      function persistToken(token) {
+        try {
+          if (token) localStorage.setItem('somacheck_deferred_token', token);
+        } catch (_) {}
+      }
+
+      function fetchShare() {
+        return fetch(buildShareUrl(token), { cache: 'no-store' });
+      }
+
+      function pollForAnswer() {
+        var timer = setInterval(function() {
+          fetchShare()
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              if (data && data.status === 'answered') {
+                clearInterval(timer);
+                renderVerdict(data);
+              }
+            })
+            .catch(function() {
+              // Polling errors are silent; page stays useful.
+            });
+        }, POLL_INTERVAL_MS);
+      }
+
+      function init() {
+        if (!token) {
+          showError();
+          return;
+        }
+
+        persistToken(token);
+
+        openAppEl.href = buildDeeplink(token);
+        appStoreEl.href = buildAppStoreUrl(token);
+
+        fetchShare()
+          .then(function(resp) {
+            if (!resp.ok) throw new Error('share fetch ' + resp.status);
+            return resp.json();
+          })
+          .then(function(data) {
+            if (!data || data.error) throw new Error(data && data.error ? data.error : 'invalid share');
+
+            if (data.text) {
+              statementEl.textContent = data.text;
+              document.title = 'SomaCheck - "' + data.text.replace(/"/g, '') + '"';
+            }
+
+            if (data.deeplink) openAppEl.href = data.deeplink;
+            if (data.app_store_url) appStoreEl.href = data.app_store_url + '?pt=' + encodeURIComponent(token);
+
+            renderVerdict(data);
+            setVisibleState('loaded');
+
+            if (data.status !== 'answered') {
+              pollForAnswer();
+            }
+          })
+          .catch(function(err) {
+            console.error('Share page error:', err);
+            showError();
+          });
+      }
+
+      init();
+    })();
+  </script>
+</body>
+</html>

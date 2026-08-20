@@ -1,0 +1,26 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "G4KXPE7MY4.com.sensie.somacheck"
+        ],
+        "components": [
+          {
+            "/": "/auth/callback*",
+            "comment": "Supabase signup/magic-link callback landing page; web page then opens somacheck://auth/callback."
+          },
+          {
+            "/": "/s/*",
+            "comment": "Shared statement link: opens SomaCheck app on the statement screen if installed, web fallback otherwise."
+          }
+        ]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": [
+      "G4KXPE7MY4.com.sensie.somacheck"
+    ]
+  }
+}

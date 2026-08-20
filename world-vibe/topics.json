@@ -1,0 +1,58 @@
+{
+  "topics": [
+    {
+      "id": "ai-at-work",
+      "statement": "I feel hopeful about AI at work",
+      "tag": "work",
+      "aggregate": {
+        "aligned_pct": null,
+        "count": 0,
+        "countries": {
+          "Other": 100
+        },
+        "suppressed": true
+      },
+      "share_url": "/world-vibe/share/ai-at-work",
+      "share_og": "/world-vibe/assets/og-ai-at-work.png",
+      "qr_asset": "/world-vibe/assets/qr-ai-at-work.png",
+      "answer_url": "https://somacheck.com/s/URoCvcgHQGegLWEahOs3mw.pq4FOD-BrZe1lPtqflBIOe"
+    },
+    {
+      "id": "gut-vs-dashboard",
+      "statement": "I trust my gut more than my dashboard",
+      "tag": "decisions",
+      "aggregate": {
+        "aligned_pct": null,
+        "count": 0,
+        "countries": {
+          "Other": 100
+        },
+        "suppressed": true
+      },
+      "share_url": "/world-vibe/share/gut-vs-dashboard",
+      "share_og": "/world-vibe/assets/og-gut-vs-dashboard.png",
+      "qr_asset": "/world-vibe/assets/qr-gut-vs-dashboard.png",
+      "answer_url": "https://somacheck.com/s/5aRdMzRcRQmyipiqAEefXQ.4uzmdAb8CzRXZPoc15rr6E"
+    },
+    {
+      "id": "present-leadership",
+      "statement": "I am fully present with the people I lead",
+      "tag": "leadership",
+      "aggregate": {
+        "aligned_pct": null,
+        "count": 0,
+        "countries": {
+          "Other": 100
+        },
+        "suppressed": true
+      },
+      "share_url": "/world-vibe/share/present-leadership",
+      "share_og": "/world-vibe/assets/og-present-leadership.png",
+      "qr_asset": "/world-vibe/assets/qr-present-leadership.png",
+      "answer_url": "https://somacheck.com/s/gD791AVYQwGrvso_Ju6sCA.00p1sTKQeGY-JEm95t07a8"
+    }
+  ],
+  "data_source": "live_signed_links",
+  "refreshed_at": "2026-08-20T21:11:00.735763Z",
+  "note": "Three live seeded topics with real signed /s/{token} links issued by the SDK Statement API. Aggregate counts are fetched anonymously from the public aggregate endpoint and suppressed below 5 responses. No bearer key or secret is present in this file."
+}

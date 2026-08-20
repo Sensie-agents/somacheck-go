@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>World Vibe - SomaCheck</title>
+  <meta name="description" content="Anonymous vibechecks on the ideas shaping our world. Add your answer in 3 seconds. No name. No tracking.">
+  <meta property="og:title" content="World Vibe - SomaCheck">
+  <meta property="og:description" content="Anonymous vibechecks on the ideas shaping our world. Add your answer in 3 seconds.">
+  <meta property="og:image" content="https://somacheck.com/world-vibe/assets/og-ai-at-work.png">
+  <meta property="og:url" content="https://somacheck.com/world-vibe">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="World Vibe - SomaCheck">
+  <meta name="twitter:description" content="Anonymous vibechecks on the ideas shaping our world. Add your answer in 3 seconds.">
+  <meta name="twitter:image" content="https://somacheck.com/world-vibe/assets/og-ai-at-work.png">
+  <link rel="canonical" href="https://somacheck.com/world-vibe">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #FBF6EE;
+      --card: #FFFFFF;
+      --ink: #261D16;
+      --muted: #405340;
+      --faint: #8A9499;
+      --emerald: #12A594;
+      --emerald-hover: #0e8576;
+      --emerald-soft: rgba(18, 165, 148, 0.10);
+      --amber: #F4B26B;
+      --amber-soft: rgba(244, 178, 107, 0.12);
+      --border: #E8E0D4;
+      --radius: 24px;
+      --max-width: 980px;
+      --font-body: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0a0b0d;
+        --card: #111315;
+        --ink: #e8ecef;
+        --muted: #8a9499;
+        --faint: #4a5258;
+        --border: #1b2023;
+        --emerald-soft: rgba(18, 165, 148, 0.12);
+        --amber-soft: rgba(244, 178, 107, 0.10);
+      }
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font-body);
+      line-height: 1.55;
+      min-height: 100dvh;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--emerald); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { max-width: var(--max-width); margin: 0 auto; padding: 64px 24px 96px; }
+    header { text-align: center; margin-bottom: 48px; }
+    .brand {
+      color: var(--emerald);
+      font-weight: 800;
+      letter-spacing: .22em;
+      text-transform: uppercase;
+      font-size: 12px;
+      margin-bottom: 18px;
+      font-family: var(--font-mono);
+    }
+    h1 { font-size: clamp(2.4rem, 7vw, 4rem); line-height: 1.05; margin-bottom: 16px; font-weight: 800; }
+    .lede { color: var(--muted); font-size: clamp(1.05rem, 2.4vw, 1.3rem); max-width: 640px; margin: 0 auto; }
+    .how {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px 28px;
+      margin-bottom: 32px;
+      color: var(--muted);
+      font-size: .98rem;
+    }
+    .how strong { color: var(--ink); }
+    .how ol { margin: 12px 0 0 20px; }
+    .how li { margin: 8px 0; }
+    .topics { display: grid; gap: 24px; }
+    .topic {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      scroll-margin-top: 24px;
+      transition: border-color .15s;
+    }
+    .topic:target { border-color: var(--emerald); }
+    .topic-header { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+    .tag {
+      background: var(--emerald-soft);
+      color: var(--emerald);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-family: var(--font-mono);
+    }
+    .statement { font-size: clamp(1.35rem, 3.6vw, 1.85rem); font-weight: 700; line-height: 1.3; margin-bottom: 22px; }
+    .topic-body { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: start; }
+    .aggregate { display: grid; gap: 14px; }
+    .stat { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .stat .value { font-size: 2.6rem; font-weight: 800; color: var(--amber); line-height: 1; }
+    .stat .label { color: var(--muted); font-size: .95rem; }
+    .first-five { color: var(--muted); font-size: 1rem; }
+    .first-five .value { font-size: 1.1rem; font-weight: 700; color: var(--emerald); }
+    .countries { display: flex; flex-wrap: wrap; gap: 8px; }
+    .country {
+      background: var(--amber-soft);
+      color: var(--amber);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 10px;
+      border-radius: 8px;
+    }
+    .qr { text-align: center; }
+    .qr img { width: 132px; height: 132px; border-radius: 14px; display: block; border: 1px solid var(--border); }
+    .qr-caption { font-size: 11px; color: var(--faint); margin-top: 8px; font-family: var(--font-mono); }
+    .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      border: none; border-radius: 12px; padding: 14px 22px; font-size: 15px; font-weight: 700;
+      cursor: pointer; transition: background .15s, transform .05s; text-decoration: none; font-family: var(--font-body);
+    }
+    .btn-primary { background: var(--emerald); color: #fff; }
+    .btn-primary:hover { background: var(--emerald-hover); text-decoration: none; }
+    .btn-secondary { background: var(--emerald-soft); color: var(--emerald); }
+    .btn-secondary:hover { background: rgba(18, 165, 148, 0.18); text-decoration: none; }
+    .btn:active { transform: translateY(1px); }
+    .empty, .error { text-align: center; color: var(--muted); padding: 80px 24px; }
+    footer { text-align: center; color: var(--faint); font-size: 13px; margin-top: 80px; }
+    footer nav { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; }
+    .note { background: var(--emerald-soft); border-left: 3px solid var(--emerald); padding: 16px 20px; border-radius: 0 12px 12px 0; color: var(--muted); font-size: .95rem; margin-bottom: 32px; }
+    .note strong { color: var(--ink); }
+    .last-updated { text-align: center; color: var(--faint); font-size: 12px; margin-top: 16px; font-family: var(--font-mono); }
+    @media (max-width: 720px) {
+      .topic-body { grid-template-columns: 1fr; }
+      .qr { order: -1; }
+      .qr img { margin: 0 auto; }
+      .actions { flex-direction: column; }
+      .btn { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <div class="brand">SomaCheck</div>
+      <h1>World Vibe</h1>
+      <p class="lede">Anonymous vibechecks on the ideas shaping our world. Add your answer in 3 seconds. No name. No tracking.</p>
+    </header>
+
+    <div class="how">
+      <strong>How it works:</strong>
+      <ol>
+        <li>Pick a statement that catches you.</li>
+        <li>Tap the link or scan the QR code. Each scan starts your own check-in in the SomaCheck app.</li>
+        <li>Do the 3-second wrist check. Your answer joins the anonymous aggregate.</li>
+        <li>Come back here to see how the world lands. Numbers stay hidden until at least 5 people have answered.</li>
+      </ol>
+    </div>
+
+    <div id="topics" class="topics" aria-live="polite">
+      <div class="empty">Loading topics...</div>
+    </div>
+
+    <p class="last-updated" id="last-updated"></p>
+
+    <footer>
+      <nav>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+        <a href="/support">Support</a>
+      </nav>
+      <p>Part of SomaCheck research trials in measurable resilience.</p>
+    </footer>
+  </main>
+
+  <script>
+    (function() {
+      var APP_STORE_URL = 'https://apps.apple.com/app/id6792978184';
+      var STATEMENT_API_URL = 'https://pbldcmniommltbdwuykk.supabase.co/functions/v1/statement-api';
+
+      function shareText(topic) {
+        return "The world is testing: '" + topic.statement + "'. Where do you land? " + topic.answer_url;
+      }
+
+      function renderAggregate(topic) {
+        var agg = topic.aggregate || {};
+        if (agg.suppressed || agg.count === 0 || agg.aligned_pct === null || agg.aligned_pct === undefined) {
+          return '<div class="first-five"><span class="value">Be one of the first 5</span><br>Your check-in is anonymous. Numbers appear after 5 people have answered.</div>';
+        }
+        var countriesHtml = Object.keys(agg.countries || {})
+          .map(function(code) {
+            return '<span class="country">' + escapeHtml(code) + ' ' + agg.countries[code] + '%</span>';
+          }).join('');
+        return '<div class="stat"><span class="value">' + agg.aligned_pct + '%</span><span class="label">aligned</span></div>' +
+          '<div class="stat"><span class="value">' + (agg.count || 0).toLocaleString() + '</span><span class="label">anonymous responses</span></div>' +
+          (countriesHtml ? '<div class="countries">' + countriesHtml + '</div>' : '');
+      }
+
+      function renderTopics(topics) {
+        var container = document.getElementById('topics');
+        container.innerHTML = '';
+        topics.forEach(function(topic) {
+          var el = document.createElement('article');
+          el.className = 'topic';
+          el.id = 'topic-' + topic.id;
+
+          el.innerHTML =
+            '<div class="topic-header"><span class="tag">' + escapeHtml(topic.tag) + '</span></div>' +
+            '<div class="statement">' + escapeHtml(topic.statement) + '</div>' +
+            '<div class="topic-body">' +
+              '<div class="aggregate">' + renderAggregate(topic) + '</div>' +
+              '<div class="qr">' +
+                '<img src="' + topic.qr_asset + '" alt="QR code to answer ' + escapeHtml(topic.statement) + '">' +
+                '<div class="qr-caption">Scan to answer</div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="actions">' +
+              '<a class="btn btn-primary answer-btn" href="' + topic.answer_url + '" data-topic-id="' + topic.id + '">Test it against your own body</a>' +
+              '<button class="btn btn-secondary share-btn" data-topic-id="' + topic.id + '">Share this topic</button>' +
+            '</div>';
+
+          container.appendChild(el);
+        });
+
+        bindActions(topics);
+        highlightTopicFromQuery();
+      }
+
+      function escapeHtml(str) {
+        return String(str).replace(/[&<>"']/g, function(c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+
+      function bindActions(topics) {
+        document.querySelectorAll('.share-btn').forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            var topic = topics.find(function(t) { return t.id === btn.dataset.topicId; });
+            if (!topic) return;
+            var text = shareText(topic);
+            if (navigator.share) {
+              navigator.share({ title: 'World Vibe - SomaCheck', text: text, url: topic.answer_url }).catch(function(){});
+            } else if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(function() {
+                var original = btn.textContent;
+                btn.textContent = 'Link copied';
+                setTimeout(function() { btn.textContent = original; }, 1500);
+              }).catch(function(){});
+            }
+          });
+        });
+      }
+
+      function highlightTopicFromQuery() {
+        var params = new URLSearchParams(window.location.search);
+        var t = params.get('t');
+        if (t) {
+          var el = document.getElementById('topic-' + t);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }
+
+      function mergeAggregate(topics, aggregate) {
+        var rows = (aggregate && aggregate.topics) || [];
+        var byTopic = {};
+        rows.forEach(function(row) { byTopic[row.topic] = row; });
+        return topics.map(function(topic) {
+          var live = byTopic[topic.id];
+          if (!live) return topic;
+          topic.aggregate = {
+            aligned_pct: live.aligned_pct,
+            count: live.count,
+            countries: live.countries || {},
+            suppressed: live.suppressed
+          };
+          return topic;
+        });
+      }
+
+      function updateLastUpdated(ts) {
+        var el = document.getElementById('last-updated');
+        if (!el) return;
+        var d = ts ? new Date(ts) : new Date();
+        el.textContent = 'Updated ' + d.toLocaleString();
+      }
+
+      function loadTopics() {
+        fetch('topics.json')
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            var topics = data.topics || [];
+            return fetch(STATEMENT_API_URL + '/v0/public/aggregate')
+              .then(function(r) { return r.ok ? r.json() : null; })
+              .then(function(aggregate) {
+                if (aggregate) {
+                  topics = mergeAggregate(topics, aggregate);
+                  updateLastUpdated(aggregate.generated_at);
+                }
+                return topics;
+              })
+              .catch(function() { return topics; });
+          })
+          .then(function(topics) { renderTopics(topics); })
+          .catch(function(err) {
+            document.getElementById('topics').innerHTML = '<div class="error">Topics could not be loaded. Please try again later.</div>';
+            console.error('World Vibe load error:', err);
+          });
+      }
+
+      loadTopics();
+      // Refresh aggregates every 60 seconds to match the API cache.
+      setInterval(loadTopics, 60000);
+    })();
+  </script>
+</body>
+</html>
