@@ -7,15 +7,14 @@
   <meta name="description" content="The world is testing: 'I trust my gut more than my dashboard'. Where do you land? Add your anonymous vibecheck on SomaCheck.">
   <meta property="og:title" content="World Vibe: I trust my gut more than my dashboard">
   <meta property="og:description" content="The world is testing: 'I trust my gut more than my dashboard'. Where do you land? Add your anonymous vibecheck on SomaCheck.">
-  <meta property="og:image" content="https://somacheck.com/world-vibe/assets/og-gut-vs-dashboard.png">
-  <meta property="og:url" content="https://somacheck.com/world-vibe/share/gut-vs-dashboard">
+  <meta property="og:image" content="https://go.somacheck.com/world-vibe/assets/og-gut-vs-dashboard.png">
+  <meta property="og:url" content="https://go.somacheck.com/world-vibe/share/gut-vs-dashboard">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="World Vibe: I trust my gut more than my dashboard">
   <meta name="twitter:description" content="The world is testing: 'I trust my gut more than my dashboard'. Where do you land? Add your anonymous vibecheck on SomaCheck.">
-  <meta name="twitter:image" content="https://somacheck.com/world-vibe/assets/og-gut-vs-dashboard.png">
-  <meta http-equiv="refresh" content="0; url=https://somacheck.com/s/5aRdMzRcRQmyipiqAEefXQ.4uzmdAb8CzRXZPoc15rr6E">
-  <link rel="canonical" href="https://somacheck.com/world-vibe/share/gut-vs-dashboard">
+  <meta name="twitter:image" content="https://go.somacheck.com/world-vibe/assets/og-gut-vs-dashboard.png">
+  <link rel="canonical" href="https://go.somacheck.com/world-vibe/share/gut-vs-dashboard">
   <style>
     :root { --bg:#FBF6EE; --ink:#261D16; --muted:#405340; --emerald:#12A594; }
     @media (prefers-color-scheme: dark) { :root { --bg:#0a0b0d; --ink:#e8ecef; --muted:#8a9499; } }
@@ -23,12 +22,69 @@
     .card { max-width:520px; padding:40px 24px; }
     a { color:var(--emerald); }
     p { color:var(--muted); line-height:1.5; }
+    .spinner { display:inline-block; width:20px; height:20px; border:2px solid var(--emerald); border-top-color:transparent; border-radius:50%; animation:spin 1s linear infinite; margin-bottom:12px; }
+    @keyframes spin { to { transform:rotate(360deg); } }
   </style>
 </head>
 <body>
-  <div class="card">
-    <p>Redirecting to your check-in...</p>
-    <p><a href="https://somacheck.com/s/5aRdMzRcRQmyipiqAEefXQ.4uzmdAb8CzRXZPoc15rr6E">Open World Vibe</a></p>
+  <div class="card" id="card">
+    <div class="spinner"></div>
+    <p>Preparing your check-in...</p>
   </div>
+  <script>
+    (function() {
+      var STATEMENT_API_URL = 'https://pbldcmniommltbdwuykk.supabase.co/functions/v1/statement-api';
+      var topic = "gut-vs-dashboard";
+      var shareUrl = 'https://go.somacheck.com/world-vibe/share/gut-vs-dashboard';
+      var card = document.getElementById('card');
+
+      function setError(message, sub) {
+        card.innerHTML = '<p><strong>' + escapeHtml(message) + '</strong></p>' + (sub ? '<p>' + escapeHtml(sub) + '</p>' : '');
+      }
+
+      function escapeHtml(str) {
+        return String(str).replace(/[&<>"']/g, function(c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+
+      function redirectTo(url) {
+        var meta = document.createElement('meta');
+        meta.httpEquiv = 'refresh';
+        meta.content = '0; url=' + url;
+        document.head.appendChild(meta);
+        card.innerHTML = '<p>Redirecting to your check-in...</p><p><a href="' + escapeHtml(url) + '">Open World Vibe</a></p>';
+        window.location.href = url;
+      }
+
+      fetch(STATEMENT_API_URL + '/v0/public/topics/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic: topic })
+      }).then(function(r) {
+        if (r.status === 404) {
+          setError('This topic has been retired.', 'Pick a live topic at ' + shareUrl.replace('/share/' + topic, ''));
+          return;
+        }
+        if (r.status === 429) {
+          setError('the world is busy today, come back tomorrow');
+          return;
+        }
+        if (!r.ok) {
+          setError('Something went wrong. Please try again.');
+          return;
+        }
+        return r.json().then(function(data) {
+          if (data && data.link_url) {
+            redirectTo(data.link_url);
+          } else {
+            setError('Something went wrong. Please try again.');
+          }
+        });
+      }).catch(function() {
+        setError('Something went wrong. Please try again.');
+      });
+    })();
+  </script>
 </body>
 </html>
