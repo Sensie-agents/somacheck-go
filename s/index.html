@@ -252,7 +252,7 @@
   <script>
     (function() {
       // Config: set window.SOMACHECK_API_BASE to override (e.g. local mock).
-      var API_BASE = (typeof window !== 'undefined' && window.SOMACHECK_API_BASE) || '';
+      var API_BASE = (typeof window !== 'undefined' && window.SOMACHECK_API_BASE) || 'https://pbldcmniommltbdwuykk.supabase.co/functions/v1/statement-api';
       var APP_STORE_ID = '6792978184';
       var POLL_INTERVAL_MS = 3000;
 
@@ -296,7 +296,7 @@
       }
 
       function buildShareUrl(token) {
-        return API_BASE + '/v0/statements/' + encodeURIComponent(token) + '/share';
+        return API_BASE + '/s/' + encodeURIComponent(token) + '?format=json';
       }
 
       function buildDeeplink(token) {
