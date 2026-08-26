@@ -17,7 +17,8 @@ const token = 'wvsmart-functional-gate';
 const statement = 'I trust my gut more than my dashboard';
 const expectedUniversalLink = `https://go.somacheck.com/s/${token}`;
 const expectedAppLink = `somacheck://s/${token}`;
-const expectedInstallLink = 'https://apps.apple.com/app/id6792978184';
+// App Store id6792978184 remains the post-publication cutover target.
+const expectedInstallLink = 'https://testflight.apple.com/join/C4mAH3zz';
 
 const [fallback, source, qrLibrary] = await Promise.all([
   readFile(fallbackPath, 'utf8'),
@@ -83,7 +84,7 @@ try {
   await assert.doesNotReject(() => page.locator('#statement-text').waitFor({ state: 'visible' }));
   assert.equal(await page.locator('#statement-text').textContent(), statement, 'resolved statement must be shown exactly');
   assert.equal(await page.locator('#open-app').getAttribute('href'), expectedAppLink, 'button must use the installed-app custom scheme');
-  assert.equal(await page.locator('#app-store').getAttribute('href'), expectedInstallLink, 'install button must use the real public App Store URL');
+  assert.equal(await page.locator('#app-store').getAttribute('href'), expectedInstallLink, 'install button must use the current working public TestFlight URL');
   assert.equal(await page.locator('#statement-qr').getAttribute('data-payload'), expectedUniversalLink, 'QR payload must be the first-party universal link');
   assert.equal(await page.locator('#statement-qr').getAttribute('title'), expectedUniversalLink, 'rendered QR must encode the same universal link');
 
@@ -94,7 +95,7 @@ try {
   await qr.screenshot({ path: path.join(process.env.WVSMART_ARTIFACT_DIR || '/tmp', 'wvsmart-qr.png') });
 
   assert.match(await page.locator('#statement-hint').textContent(), /check-in saves to your account\. Any public World Vibe results appear only in aggregate\./i, 'fallback copy must stay truthful about account linkage and aggregate-only public results');
-  assert.match(await page.locator('.install-note').textContent(), /install it from the App Store, then return to this link/i, 'no-app limitation must be visible');
+  assert.match(await page.locator('.install-note').textContent(), /install it through TestFlight, then return to this link/i, 'no-app limitation must be visible');
   assert.equal(await page.locator('#status-badge').textContent(), 'Shared check-in', 'page must reach its loaded state');
 
   const missing = await browser.newPage({ viewport: { width: 390, height: 844 } });

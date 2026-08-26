@@ -26,7 +26,8 @@ assert.match(source, /Share this World Vibe/, 'portal must expose the concise sh
 assert.match(source, /setInterval\(function\(\) \{[\s\S]*POLL_MS\);/, 'portal must poll on a 5 to 10 second timer');
 
 const branchBase = 'https://link.somacheck.test';
-const installUrl = 'https://apps.apple.com/app/id6792978184';
+// App Store id6792978184 is the post-publication cutover target.
+const installUrl = 'https://testflight.apple.com/join/C4mAH3zz';
 const initialTime = '2026-08-26T13:00:00.000Z';
 const firstRefreshTime = '2026-08-26T13:01:00.000Z';
 const unlockedTime = '2026-08-26T13:03:00.000Z';
@@ -387,7 +388,7 @@ try {
   });
 
   const routeNote = page.locator('#topic-gut-vs-dashboard .route-note');
-  assert.equal(await routeNote.getAttribute('data-install-url'), installUrl, 'route seam must carry the configured App Store target');
+  assert.equal(await routeNote.getAttribute('data-install-url'), installUrl, 'route seam must carry the configured current public fallback target');
   assert.match(await page.locator('#topic-gut-vs-dashboard .privacy-line').textContent(), /limited routing data may be used/i, 'privacy disclosure must describe the install-return behavior');
   assert.equal(await page.locator('#topic-gut-vs-dashboard .share-btn').textContent(), 'Share this World Vibe', 'share CTA label must stay concise');
   assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').textContent(), 'Start your check-in', 'join CTA must stay explicit');

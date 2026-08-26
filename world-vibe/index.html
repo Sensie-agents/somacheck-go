@@ -232,7 +232,9 @@
       var STATEMENT_API_URL = (typeof window !== 'undefined' && window.SOMACHECK_API_BASE) || 'https://pbldcmniommltbdwuykk.supabase.co/functions/v1/statement-api';
       var POLL_MS = 7000;
       var DEFAULT_THRESHOLD = 5;
-      var APP_INSTALL_URL = (typeof window !== 'undefined' && window.SOMACHECK_INSTALL_URL) || 'https://apps.apple.com/app/id6792978184';
+      // Runtime seam can cut over to the App Store after publication.
+      // Until then, the working public fallback is TestFlight.
+      var APP_INSTALL_URL = (typeof window !== 'undefined' && window.SOMACHECK_INSTALL_URL) || 'https://testflight.apple.com/join/C4mAH3zz';
       var BRANCH_ROUTE_BASE = (typeof window !== 'undefined' && window.SOMACHECK_BRANCH_ROUTE_BASE) || '';
       var state = {
         topics: [],
