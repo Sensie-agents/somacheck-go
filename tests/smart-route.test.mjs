@@ -93,7 +93,7 @@ try {
   assert.equal(await qr.locator('canvas').count(), 1, 'QR renderer must draw a real canvas');
   await qr.screenshot({ path: path.join(process.env.WVSMART_ARTIFACT_DIR || '/tmp', 'wvsmart-qr.png') });
 
-  assert.match(await page.locator('#statement-hint').textContent(), /anonymous\. See what you notice\./, 'copy must preserve anonymity and human authority');
+  assert.match(await page.locator('#statement-hint').textContent(), /check-in saves to your account\. Any public World Vibe results appear only in aggregate\./i, 'fallback copy must stay truthful about account linkage and aggregate-only public results');
   assert.match(await page.locator('.install-note').textContent(), /install it through TestFlight, then return to this link/i, 'no-app limitation must be visible');
   assert.equal(await page.locator('#status-badge').textContent(), 'Shared check-in', 'page must reach its loaded state');
 

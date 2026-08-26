@@ -4,15 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>World Vibe - SomaCheck</title>
-  <meta name="description" content="Anonymous vibechecks on the ideas shaping our world. Add your answer in 3 seconds. No name. No tracking.">
+  <meta name="description" content="World Vibe topics you can open in SomaCheck. Add your check-in in 3 seconds and watch the aggregate unlock.">
   <meta property="og:title" content="World Vibe - SomaCheck">
-  <meta property="og:description" content="Anonymous vibechecks on the ideas shaping our world. Add your answer in 3 seconds.">
+  <meta property="og:description" content="World Vibe topics you can open in SomaCheck. Add your check-in in 3 seconds and watch the aggregate unlock.">
   <meta property="og:image" content="https://go.somacheck.com/world-vibe/assets/og-ai-at-work.png">
   <meta property="og:url" content="https://go.somacheck.com/world-vibe">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="World Vibe - SomaCheck">
-  <meta name="twitter:description" content="Anonymous vibechecks on the ideas shaping our world. Add your answer in 3 seconds.">
+  <meta name="twitter:description" content="World Vibe topics you can open in SomaCheck. Add your check-in in 3 seconds and watch the aggregate unlock.">
   <meta name="twitter:image" content="https://go.somacheck.com/world-vibe/assets/og-ai-at-work.png">
   <link rel="canonical" href="https://go.somacheck.com/world-vibe">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -113,8 +113,20 @@
     .stat { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
     .stat .value { font-size: 2.6rem; font-weight: 800; color: var(--amber); line-height: 1; }
     .stat .label { color: var(--muted); font-size: .95rem; }
-    .first-five { color: var(--muted); font-size: 1rem; }
-    .first-five .value { font-size: 1.1rem; font-weight: 700; color: var(--emerald); }
+    .progress-lock { display: grid; gap: 6px; }
+    .progress-lock .value { font-size: 2rem; font-weight: 800; color: var(--emerald); line-height: 1; }
+    .progress-lock .label { color: var(--muted); font-size: .98rem; }
+    .progress-lock .hint { color: var(--faint); font-size: .9rem; }
+    .split { display: grid; gap: 10px; }
+    .split-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      font-size: .98rem;
+      color: var(--muted);
+    }
+    .split-row strong { color: var(--ink); font-size: 1.1rem; }
     .countries { display: flex; flex-wrap: wrap; gap: 8px; }
     .country {
       background: var(--amber-soft);
@@ -125,8 +137,26 @@
       border-radius: 8px;
     }
     .qr { text-align: center; }
-    .qr img { width: 132px; height: 132px; border-radius: 14px; display: block; border: 1px solid var(--border); }
+    .qr .qr-image {
+      width: 132px;
+      height: 132px;
+      border-radius: 14px;
+      display: block;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      background: #fff;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .qr .qr-image canvas,
+    .qr .qr-image svg,
+    .qr .qr-image img {
+      width: 100% !important;
+      height: 100% !important;
+      display: block;
+    }
     .qr-caption { font-size: 11px; color: var(--faint); margin-top: 8px; font-family: var(--font-mono); }
+    .route-note { color: var(--muted); font-size: .88rem; margin-top: 10px; max-width: 220px; margin-left: auto; }
     .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
     .btn {
       display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -141,6 +171,18 @@
     .btn:active { transform: translateY(1px); }
     .status { margin-top: 14px; font-size: .95rem; color: var(--muted); }
     .status.error { color: #b94e48; }
+    .receipt {
+      background: var(--emerald-soft);
+      border-left: 3px solid var(--emerald);
+      border-radius: 0 12px 12px 0;
+      padding: 14px 16px;
+      display: none;
+      gap: 6px;
+    }
+    .receipt.visible { display: grid; }
+    .receipt strong { color: var(--ink); }
+    .privacy-line { color: var(--faint); font-size: .88rem; }
+    .topic-updated { color: var(--faint); font-size: .82rem; font-family: var(--font-mono); }
     .empty, .error { text-align: center; color: var(--muted); padding: 80px 24px; }
     footer { text-align: center; color: var(--faint); font-size: 13px; margin-top: 80px; }
     footer nav { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -161,17 +203,17 @@
     <header>
       <div class="brand">SomaCheck</div>
       <h1>World Vibe</h1>
-      <p class="lede">Anonymous vibechecks on the ideas shaping our world. Add your answer in 3 seconds. No name. No tracking.</p>
+      <p class="lede">Topics shaping work, culture, and leadership. Open one in SomaCheck, add your check-in in 3 seconds, and watch the aggregate unlock.</p>
     </header>
 
     <div class="how">
       <strong>How it works:</strong>
       <ol>
         <li>Pick a statement that catches you.</li>
-        <li>Tap the button. We create a fresh check-in just for you.</li>
-        <li>Scan the QR code or open the link in the SomaCheck app.</li>
-        <li>Do the 3-second wrist check. Your answer joins the anonymous aggregate.</li>
-        <li>Come back here to see how the world lands. Numbers stay hidden until at least 5 people have answered.</li>
+        <li>Scan the QR code or tap into SomaCheck to open that exact topic.</li>
+        <li>Do the 3-second wrist check. Your check-in saves to your account and updates the public aggregate.</li>
+        <li>Before five people join, the page shows only progress.</li>
+        <li>After five people join, the World Vibe split appears here for everyone.</li>
       </ol>
     </div>
 
@@ -197,11 +239,19 @@
   </script>
   <script>
     (function() {
-      var STATEMENT_API_URL = 'https://pbldcmniommltbdwuykk.supabase.co/functions/v1/statement-api';
+      var STATEMENT_API_URL = (typeof window !== 'undefined' && window.SOMACHECK_API_BASE) || 'https://pbldcmniommltbdwuykk.supabase.co/functions/v1/statement-api';
+      var POLL_MS = 7000;
+      var DEFAULT_THRESHOLD = 5;
+      var APP_INSTALL_URL = (typeof window !== 'undefined' && window.SOMACHECK_INSTALL_URL) || 'https://testflight.apple.com/join/C4mAH3zz';
+      var BRANCH_ROUTE_BASE = (typeof window !== 'undefined' && window.SOMACHECK_BRANCH_ROUTE_BASE) || '';
+      var state = {
+        topics: [],
+        byId: {},
+        initialized: false
+      };
 
-      function shareUrl(topic) { return '/world-vibe/share/' + topic.id; }
-      function portalUrl(topic) { return '/world-vibe?t=' + topic.id; }
-      function qrAsset(topic) { return '/world-vibe/assets/qr-' + topic.id + '.png'; }
+      function shareUrl(topic) { return '/world-vibe/share/' + encodeURIComponent(topic.id); }
+      function portalUrl(topic) { return '/world-vibe?t=' + encodeURIComponent(topic.id); }
       function shareOg(topic) { return '/world-vibe/assets/og-' + topic.id + '.png'; }
       function absolute(path) {
         if (typeof window !== 'undefined' && window.location && window.location.origin) {
@@ -209,52 +259,77 @@
         }
         return 'https://go.somacheck.com' + path;
       }
-      function shareText(topic) {
-        return "The world is testing: '" + topic.statement + "'. Where do you land? " + absolute(shareUrl(topic));
-      }
-
-      function generateQrDataUrl(text) {
-        var container = document.createElement('div');
-        container.style.position = 'absolute';
-        container.style.left = '-9999px';
-        document.body.appendChild(container);
-        var qr = new QRCode(container, {
-          text: text,
-          width: 410,
-          height: 410,
-          colorDark: '#0a0b0d',
-          colorLight: '#ffffff',
-          correctLevel: QRCode.CorrectLevel.M
-        });
-        var canvas = container.querySelector('canvas');
-        var dataUrl = canvas ? canvas.toDataURL('image/png') : '';
-        document.body.removeChild(container);
-        return dataUrl;
-      }
-
-      function renderAggregate(topic) {
-        var agg = topic.aggregate || {};
-        if (agg.suppressed || agg.count === 0 || agg.aligned_pct === null || agg.aligned_pct === undefined) {
-          return '<div class="first-five"><span class="value">Be one of the first 5</span><br>Your check-in is anonymous. Numbers appear after 5 people have answered.</div>';
+      function topicRouteUrl(topic) {
+        if (topic.routeUrl) return topic.routeUrl;
+        if (BRANCH_ROUTE_BASE) {
+          return BRANCH_ROUTE_BASE.replace(/\/$/, '') + shareUrl(topic);
         }
-        var countriesHtml = Object.keys(agg.countries || {})
-          .map(function(code) {
-            return '<span class="country">' + escapeHtml(code) + ' ' + agg.countries[code] + '%</span>';
-          }).join('');
-        return '<div class="stat"><span class="value">' + agg.aligned_pct + '%</span><span class="label">aligned</span></div>' +
-          '<div class="stat"><span class="value">' + (agg.count || 0).toLocaleString() + '</span><span class="label">anonymous responses</span></div>' +
-          (countriesHtml ? '<div class="countries">' + countriesHtml + '</div>' : '');
+        return absolute(shareUrl(topic));
       }
-
+      function shareText(topic) {
+        return "World Vibe: '" + topic.statement + "'. Open it in SomaCheck: " + topicRouteUrl(topic);
+      }
+      function createNonce() {
+        if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+          return crypto.randomUUID();
+        }
+        return 'wv-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+      }
+      function formatTimestamp(ts) {
+        if (!ts) return 'Waiting for the first completed check-in';
+        var d = new Date(ts);
+        if (isNaN(d.getTime())) return 'Waiting for the first completed check-in';
+        return 'Last check-in ' + d.toLocaleString();
+      }
+      function normalizeProgress(raw) {
+        raw = raw || {};
+        var threshold = Number(raw.threshold || raw.unlock_threshold || DEFAULT_THRESHOLD) || DEFAULT_THRESHOLD;
+        var contributorCount = Number(raw.contributor_count);
+        if (!isFinite(contributorCount)) contributorCount = Number(raw.count);
+        if (!isFinite(contributorCount)) contributorCount = 0;
+        var alignedTotal = raw.aligned_total;
+        if (!isFinite(Number(alignedTotal)) && isFinite(Number(raw.aligned_count))) alignedTotal = Number(raw.aligned_count);
+        alignedTotal = isFinite(Number(alignedTotal)) ? Number(alignedTotal) : null;
+        var unalignedTotal = raw.unaligned_total;
+        if (!isFinite(Number(unalignedTotal)) && isFinite(Number(raw.unaligned_count))) unalignedTotal = Number(raw.unaligned_count);
+        unalignedTotal = isFinite(Number(unalignedTotal)) ? Number(unalignedTotal) : null;
+        return {
+          contributorCount: contributorCount,
+          threshold: threshold,
+          remainingCount: Math.max(0, Number(raw.remaining_count) || (threshold - contributorCount)),
+          unlocked: typeof raw.unlocked === 'boolean' ? raw.unlocked : contributorCount >= threshold,
+          aggregateRevision: Number(raw.aggregate_revision || raw.revision || 0) || 0,
+          lastCompletedAt: raw.last_completed_at || raw.generated_at || null,
+          alignedTotal: alignedTotal,
+          unalignedTotal: unalignedTotal,
+          alignedPct: isFinite(Number(raw.aligned_pct)) ? Number(raw.aligned_pct) : null,
+          countries: raw.countries || {}
+        };
+      }
+      function normalizeTopic(raw) {
+        var topic = {
+          id: raw.slug || raw.id,
+          statement: raw.statement || '',
+          tag: raw.tag || 'topic',
+          routeUrl: raw.route_url || raw.branch_url || null,
+          shareOg: raw.og_image || shareOg({ id: raw.slug || raw.id }),
+          portalUrl: portalUrl({ id: raw.slug || raw.id }),
+          shareUrl: shareUrl({ id: raw.slug || raw.id }),
+          joinNonce: null,
+          joinLinkUrl: null,
+          joinAppUrl: null,
+          statementId: null,
+          etag: null,
+          progress: normalizeProgress(raw.progress || raw.aggregate || {}),
+          receipt: null
+        };
+        topic.routeUrl = topicRouteUrl(topic);
+        return topic;
+      }
       function renderTopics(topics) {
         var container = document.getElementById('topics');
         container.innerHTML = '';
         topics.forEach(function(topic) {
-          topic.shareUrl = shareUrl(topic);
-          topic.portalUrl = portalUrl(topic);
-          topic.qrAsset = qrAsset(topic);
-          topic.shareOg = shareOg(topic);
-
           var el = document.createElement('article');
           el.className = 'topic';
           el.id = 'topic-' + topic.id;
@@ -263,19 +338,25 @@
             '<div class="topic-header"><span class="tag">' + escapeHtml(topic.tag) + '</span></div>' +
             '<div class="statement">' + escapeHtml(topic.statement) + '</div>' +
             '<div class="topic-body">' +
-              '<div class="aggregate">' + renderAggregate(topic) + '</div>' +
+              '<div class="aggregate" data-role="aggregate"></div>' +
               '<div class="qr">' +
-                '<img src="' + topic.qrAsset + '" alt="QR code for ' + escapeHtml(topic.statement) + '" data-role="qr">' +
-                '<div class="qr-caption" data-role="qr-caption">Scan to answer</div>' +
+                '<div class="qr-image" data-role="qr" data-payload="' + escapeHtml(topic.routeUrl) + '" title="' + escapeHtml(topic.routeUrl) + '" aria-label="QR code for ' + escapeHtml(topic.statement) + '"></div>' +
+                '<div class="qr-caption" data-role="qr-caption">Scan to open this topic</div>' +
+                '<div class="route-note" data-install-url="' + escapeHtml(APP_INSTALL_URL) + '">If SomaCheck is installed, this route opens the topic in the app. If not, the install path can continue through Branch or the App Store and return you to this topic.</div>' +
               '</div>' +
             '</div>' +
             '<div class="actions">' +
-              '<button class="btn btn-primary answer-btn" data-topic-id="' + topic.id + '">Test it against your own body</button>' +
-              '<button class="btn btn-secondary share-btn" data-topic-id="' + topic.id + '">Share this topic</button>' +
+              '<button class="btn btn-primary answer-btn" data-topic-id="' + topic.id + '">Start your check-in</button>' +
+              '<button class="btn btn-secondary share-btn" data-topic-id="' + topic.id + '">Share this World Vibe</button>' +
             '</div>' +
-            '<div class="status" data-role="status"></div>';
+            '<div class="privacy-line">Your identity is not shown here. Results appear only in aggregate. If you install first, limited routing data may be used to return you to this topic.</div>' +
+            '<div class="status" data-role="status"></div>' +
+            '<div class="receipt" data-role="receipt"></div>';
 
           container.appendChild(el);
+          state.byId[topic.id] = topic;
+          renderQr(topic.id, topic.routeUrl);
+          updateTopic(topic);
         });
 
         bindActions(topics);
@@ -288,10 +369,20 @@
         });
       }
 
+      function getTopicEl(topicId) {
+        return document.getElementById('topic-' + topicId);
+      }
+
       function getStatusEl(topicId) {
-        var topicEl = document.getElementById('topic-' + topicId);
+        var topicEl = getTopicEl(topicId);
         if (!topicEl) return null;
         return topicEl.querySelector('[data-role="status"]');
+      }
+
+      function getReceiptEl(topicId) {
+        var topicEl = document.getElementById('topic-' + topicId);
+        if (!topicEl) return null;
+        return topicEl.querySelector('[data-role="receipt"]');
       }
 
       function setStatus(topicId, message, isError) {
@@ -301,36 +392,196 @@
         el.className = 'status' + (isError ? ' error' : '');
       }
 
-      function setAnswerState(topicId, linkUrl) {
-        var topicEl = document.getElementById('topic-' + topicId);
+      function setReceipt(topicId, lines) {
+        var el = getReceiptEl(topicId);
+        if (!el) return;
+        if (!lines || !lines.length) {
+          el.innerHTML = '';
+          el.className = 'receipt';
+          return;
+        }
+        el.innerHTML = lines.map(function(line) { return '<div>' + line + '</div>'; }).join('');
+        el.className = 'receipt visible';
+      }
+
+      function renderQr(topicId, payload) {
+        var topicEl = getTopicEl(topicId);
+        if (!topicEl) return;
+        var qrEl = topicEl.querySelector('[data-role="qr"]');
+        if (!qrEl) return;
+        qrEl.innerHTML = '';
+        qrEl.dataset.payload = payload;
+        qrEl.title = payload;
+        new QRCode(qrEl, {
+          text: payload,
+          width: 410,
+          height: 410,
+          colorDark: '#0a0b0d',
+          colorLight: '#ffffff',
+          correctLevel: QRCode.CorrectLevel.M
+        });
+      }
+
+      function setAnswerState(topicId, appUrl) {
+        var topicEl = getTopicEl(topicId);
         if (!topicEl) return;
         var btn = topicEl.querySelector('.answer-btn');
-        var qrImg = topicEl.querySelector('[data-role="qr"]');
-        var qrCaption = topicEl.querySelector('[data-role="qr-caption"]');
         if (btn) {
           var a = document.createElement('a');
           a.className = 'btn btn-primary answer-btn';
-          a.href = linkUrl;
+          a.href = appUrl;
           a.textContent = 'Open your check-in';
           a.dataset.topicId = topicId;
           btn.parentNode.replaceChild(a, btn);
         }
-        if (qrImg) {
-          var dataUrl = generateQrDataUrl(linkUrl);
-          if (dataUrl) qrImg.src = dataUrl;
+      }
+
+      function renderAggregate(topic) {
+        var progress = topic.progress || normalizeProgress();
+        if (!progress.unlocked) {
+          return '<div class="progress-lock">' +
+            '<div class="value">' + progress.contributorCount + ' of ' + progress.threshold + '</div>' +
+            '<div class="label">check-ins</div>' +
+            '<div class="hint">Results appear after ' + progress.threshold + ' people join.</div>' +
+            '<div class="topic-updated">' + escapeHtml(formatTimestamp(progress.lastCompletedAt)) + '</div>' +
+          '</div>';
         }
-        if (qrCaption) qrCaption.textContent = 'Scan your check-in';
+
+        var total = progress.contributorCount || 0;
+        var alignedTotal = progress.alignedTotal !== null && progress.alignedTotal !== undefined ? progress.alignedTotal : null;
+        var unalignedTotal = progress.unalignedTotal !== null && progress.unalignedTotal !== undefined ? progress.unalignedTotal : null;
+        var alignedPct = total && alignedTotal !== null ? Math.round((alignedTotal / total) * 100) : progress.alignedPct;
+        var unalignedPct = total && unalignedTotal !== null ? Math.round((unalignedTotal / total) * 100) : (alignedPct !== null ? Math.max(0, 100 - alignedPct) : null);
+        var splitHtml = '<div class="split">';
+        splitHtml += '<div class="split-row"><span>Aligned</span><strong>' + (alignedPct !== null ? alignedPct + '%' : (alignedTotal !== null ? alignedTotal.toLocaleString() : 'Live')) + '</strong></div>';
+        splitHtml += '<div class="split-row"><span>Unaligned</span><strong>' + (unalignedPct !== null ? unalignedPct + '%' : (unalignedTotal !== null ? unalignedTotal.toLocaleString() : 'Live')) + '</strong></div>';
+        splitHtml += '</div>';
+
+        var countriesHtml = Object.keys(progress.countries || {})
+          .map(function(code) {
+            return '<span class="country">' + escapeHtml(code) + ' ' + progress.countries[code] + '%</span>';
+          }).join('');
+
+        return splitHtml +
+          '<div class="stat"><span class="value">' + total.toLocaleString() + '</span><span class="label">check-ins</span></div>' +
+          '<div class="topic-updated">' + escapeHtml(formatTimestamp(progress.lastCompletedAt)) + '</div>' +
+          (countriesHtml ? '<div class="countries">' + countriesHtml + '</div>' : '');
+      }
+
+      function buildReceiptLines(topic) {
+        if (!topic.receipt) return [];
+        var receipt = topic.receipt;
+        var lines = [];
+        if (receipt.countedAsNewContributor && receipt.firstPosition) {
+          lines.push('<strong>You&#39;re check-in ' + receipt.firstPosition + ' of ' + receipt.unlockThreshold + '.</strong>');
+          if (receipt.unlocked) {
+            lines.push('World Vibe is live.');
+          } else {
+            var remaining = Math.max(0, receipt.unlockThreshold - receipt.contributorCount);
+            lines.push(remaining + ' more check-ins unlock the World Vibe.');
+          }
+        } else {
+          lines.push('<strong>Your latest check-in is saved.</strong>');
+          if (receipt.unlocked) {
+            lines.push(receipt.contributorCount + ' people have joined.');
+          } else {
+            lines.push(receipt.contributorCount + ' of ' + receipt.unlockThreshold + ' people have joined.');
+          }
+        }
+        lines.push('<span class="privacy-line">Your identity is not shown. Results appear only in aggregate.</span>');
+        return lines;
+      }
+
+      function updateTopic(topic) {
+        var topicEl = getTopicEl(topic.id);
+        if (!topicEl) return;
+        var aggregateEl = topicEl.querySelector('[data-role="aggregate"]');
+        if (aggregateEl) aggregateEl.innerHTML = renderAggregate(topic);
+        setReceipt(topic.id, buildReceiptLines(topic));
+      }
+
+      function normalizeReceipt(topic, raw) {
+        raw = raw || {};
+        var contributorCount = Number(raw.contributor_count);
+        if (!isFinite(contributorCount)) contributorCount = topic.progress ? topic.progress.contributorCount : 0;
+        var unlockThreshold = Number(raw.unlock_threshold || raw.threshold || DEFAULT_THRESHOLD) || DEFAULT_THRESHOLD;
+        return {
+          saveState: raw.save_state || 'counted',
+          countedAsNewContributor: !!raw.counted_as_new_contributor,
+          firstPosition: isFinite(Number(raw.first_position)) ? Number(raw.first_position) : null,
+          contributorCount: contributorCount,
+          unlockThreshold: unlockThreshold,
+          unlocked: typeof raw.unlocked === 'boolean' ? raw.unlocked : contributorCount >= unlockThreshold,
+          aggregateRevision: Number(raw.aggregate_revision || 0) || 0
+        };
+      }
+
+      function applyReceipt(topic, receipt) {
+        topic.receipt = normalizeReceipt(topic, receipt);
+        topic.progress = normalizeProgress({
+          contributor_count: topic.receipt.contributorCount,
+          threshold: topic.receipt.unlockThreshold,
+          unlocked: topic.receipt.unlocked,
+          aggregate_revision: Math.max(topic.receipt.aggregateRevision, (topic.progress && topic.progress.aggregateRevision) || 0),
+          last_completed_at: (topic.progress && topic.progress.lastCompletedAt) || null,
+          aligned_total: topic.progress && topic.progress.alignedTotal,
+          unaligned_total: topic.progress && topic.progress.unalignedTotal,
+          aligned_pct: topic.progress && topic.progress.alignedPct,
+          countries: topic.progress && topic.progress.countries
+        });
+      }
+
+      function mergeProgress(topic, raw, response) {
+        if (!topic) return;
+        var next = normalizeProgress(raw);
+        topic.progress = {
+          contributorCount: next.contributorCount,
+          threshold: next.threshold,
+          remainingCount: next.remainingCount,
+          unlocked: next.unlocked,
+          aggregateRevision: next.aggregateRevision,
+          lastCompletedAt: next.lastCompletedAt || (topic.progress && topic.progress.lastCompletedAt) || null,
+          alignedTotal: next.alignedTotal,
+          unalignedTotal: next.unalignedTotal,
+          alignedPct: next.alignedPct,
+          countries: next.countries
+        };
+        if (response) {
+          var etag = response.headers.get('etag');
+          if (etag) topic.etag = etag;
+        }
+        if (topic.receipt) {
+          topic.receipt.contributorCount = Math.max(topic.receipt.contributorCount, topic.progress.contributorCount);
+          topic.receipt.unlocked = topic.progress.unlocked;
+          topic.receipt.aggregateRevision = Math.max(topic.receipt.aggregateRevision || 0, topic.progress.aggregateRevision || 0);
+        }
+        updateTopic(topic);
+      }
+
+      function maxLastCompletedAt() {
+        var latest = null;
+        state.topics.forEach(function(topic) {
+          var ts = topic.progress && topic.progress.lastCompletedAt;
+          if (!ts) return;
+          if (!latest || new Date(ts).getTime() > new Date(latest).getTime()) latest = ts;
+        });
+        return latest;
       }
 
       function onAnswerClick(btn, topics) {
         var topic = topics.find(function(t) { return t.id === btn.dataset.topicId; });
         if (!topic) return;
+        if (topic.joinAppUrl) {
+          window.location.href = topic.joinAppUrl;
+          return;
+        }
+        if (!topic.joinNonce) topic.joinNonce = createNonce();
         btn.disabled = true;
-        setStatus(topic.id, 'Creating your check-in...', false);
-        fetch(STATEMENT_API_URL + '/v0/public/topics/join', {
+        setStatus(topic.id, 'Preparing your check-in...', false);
+        fetch(STATEMENT_API_URL + '/v1/public/world-vibe/topics/' + encodeURIComponent(topic.id) + '/join', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ topic: topic.id })
+          body: JSON.stringify({ idempotency_nonce: topic.joinNonce })
         }).then(function(r) {
           if (r.status === 404) {
             setStatus(topic.id, 'This topic has been retired.', true);
@@ -348,9 +599,14 @@
             return;
           }
           return r.json().then(function(data) {
-            if (data && data.link_url) {
+            if (data && (data.link_url || data.route_url || data.app_url)) {
               setStatus(topic.id, '', false);
-              setAnswerState(topic.id, data.link_url);
+              topic.joinLinkUrl = data.link_url || data.route_url || topic.routeUrl;
+              topic.joinAppUrl = data.app_url || topic.joinLinkUrl;
+              topic.statementId = data.statement_id || data.id || null;
+              applyReceipt(topic, data.receipt || data);
+              setAnswerState(topic.id, topic.joinAppUrl);
+              updateTopic(topic);
             } else {
               setStatus(topic.id, 'Something went wrong. Please try again.', true);
               btn.disabled = false;
@@ -372,7 +628,7 @@
             var topic = topics.find(function(t) { return t.id === btn.dataset.topicId; });
             if (!topic) return;
             var text = shareText(topic);
-            var url = absolute(topic.shareUrl);
+            var url = topic.routeUrl;
             if (navigator.share) {
               navigator.share({ title: 'World Vibe - SomaCheck', text: text, url: url }).catch(function(){});
             } else if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -395,47 +651,70 @@
         }
       }
 
-      function mergeAggregate(topics, aggregate) {
-        var rows = (aggregate && aggregate.topics) || [];
-        var byTopic = {};
-        rows.forEach(function(row) { byTopic[row.topic] = row; });
-        return topics.map(function(topic) {
-          var live = byTopic[topic.id];
-          if (!live) return topic;
-          topic.aggregate = {
-            aligned_pct: live.aligned_pct,
-            count: live.count,
-            countries: live.countries || {},
-            suppressed: live.suppressed
-          };
-          return topic;
-        });
-      }
-
       function updateLastUpdated(ts) {
         var el = document.getElementById('last-updated');
         if (!el) return;
-        var d = ts ? new Date(ts) : new Date();
-        el.textContent = 'Updated ' + d.toLocaleString();
+        el.textContent = formatTimestamp(ts);
+      }
+
+      function loadTopicsCatalog() {
+        return fetch(STATEMENT_API_URL + '/v1/public/world-vibe/topics')
+          .then(function(r) {
+            if (!r.ok) throw new Error('topics-api-unavailable');
+            return r.json();
+          })
+          .then(function(data) {
+            return (data.topics || data || []).map(normalizeTopic);
+          })
+          .catch(function() {
+            return fetch('topics.json')
+              .then(function(r) { return r.json(); })
+              .then(function(data) { return (data.topics || []).map(normalizeTopic); });
+          });
+      }
+
+      function refreshTopicProgress(topic, options) {
+        options = options || {};
+        var headers = {};
+        if (topic.etag) headers['If-None-Match'] = topic.etag;
+        return fetch(STATEMENT_API_URL + '/v1/public/world-vibe/topics/' + encodeURIComponent(topic.id) + '/progress', {
+          headers: headers
+        }).then(function(r) {
+          if (r.status === 304) return null;
+          if (!r.ok) {
+            if (options.silent) return null;
+            throw new Error('progress-unavailable-' + topic.id);
+          }
+          return r.json().then(function(data) {
+            mergeProgress(topic, data, r);
+            return data;
+          });
+        }).catch(function(err) {
+          if (!options.silent) throw err;
+          return null;
+        });
+      }
+
+      function refreshAllProgress(options) {
+        options = options || {};
+        return Promise.all(state.topics.map(function(topic) {
+          return refreshTopicProgress(topic, { silent: true });
+        })).then(function() {
+          updateLastUpdated(maxLastCompletedAt());
+        });
       }
 
       function loadTopics() {
-        fetch('topics.json')
-          .then(function(r) { return r.json(); })
-          .then(function(data) {
-            var topics = data.topics || [];
-            return fetch(STATEMENT_API_URL + '/v0/public/aggregate')
-              .then(function(r) { return r.ok ? r.json() : null; })
-              .then(function(aggregate) {
-                if (aggregate) {
-                  topics = mergeAggregate(topics, aggregate);
-                  updateLastUpdated(aggregate.generated_at);
-                }
-                return topics;
-              })
-              .catch(function() { return topics; });
+        loadTopicsCatalog()
+          .then(function(topics) {
+            state.topics = topics;
+            renderTopics(topics);
+            updateLastUpdated(maxLastCompletedAt());
+            return refreshAllProgress({ silent: true });
           })
-          .then(function(topics) { renderTopics(topics); })
+          .then(function() {
+            state.initialized = true;
+          })
           .catch(function(err) {
             document.getElementById('topics').innerHTML = '<div class="error">Topics could not be loaded. Please try again later.</div>';
             console.error('World Vibe load error:', err);
@@ -443,8 +722,10 @@
       }
 
       loadTopics();
-      // Refresh aggregates every 60 seconds to match the API cache.
-      setInterval(loadTopics, 60000);
+      setInterval(function() {
+        if (!state.initialized || document.visibilityState === 'hidden') return;
+        refreshAllProgress({ silent: true });
+      }, POLL_MS);
     })();
   </script>
 </body>
