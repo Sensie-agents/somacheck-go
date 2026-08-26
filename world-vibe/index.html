@@ -171,16 +171,6 @@
     .btn:active { transform: translateY(1px); }
     .status { margin-top: 14px; font-size: .95rem; color: var(--muted); }
     .status.error { color: #b94e48; }
-    .receipt {
-      background: var(--emerald-soft);
-      border-left: 3px solid var(--emerald);
-      border-radius: 0 12px 12px 0;
-      padding: 14px 16px;
-      display: none;
-      gap: 6px;
-    }
-    .receipt.visible { display: grid; }
-    .receipt strong { color: var(--ink); }
     .privacy-line { color: var(--faint); font-size: .88rem; }
     .topic-updated { color: var(--faint); font-size: .82rem; font-family: var(--font-mono); }
     .empty, .error { text-align: center; color: var(--muted); padding: 80px 24px; }
@@ -242,7 +232,7 @@
       var STATEMENT_API_URL = (typeof window !== 'undefined' && window.SOMACHECK_API_BASE) || 'https://pbldcmniommltbdwuykk.supabase.co/functions/v1/statement-api';
       var POLL_MS = 7000;
       var DEFAULT_THRESHOLD = 5;
-      var APP_INSTALL_URL = (typeof window !== 'undefined' && window.SOMACHECK_INSTALL_URL) || 'https://testflight.apple.com/join/C4mAH3zz';
+      var APP_INSTALL_URL = (typeof window !== 'undefined' && window.SOMACHECK_INSTALL_URL) || 'https://apps.apple.com/app/id6792978184';
       var BRANCH_ROUTE_BASE = (typeof window !== 'undefined' && window.SOMACHECK_BRANCH_ROUTE_BASE) || '';
       var state = {
         topics: [],
@@ -283,14 +273,16 @@
       }
       function normalizeProgress(raw) {
         raw = raw || {};
-        var threshold = Number(raw.threshold || raw.unlock_threshold || DEFAULT_THRESHOLD) || DEFAULT_THRESHOLD;
+        var threshold = Number(raw.unlock_threshold || raw.threshold || DEFAULT_THRESHOLD) || DEFAULT_THRESHOLD;
         var contributorCount = Number(raw.contributor_count);
         if (!isFinite(contributorCount)) contributorCount = Number(raw.count);
         if (!isFinite(contributorCount)) contributorCount = 0;
-        var alignedTotal = raw.aligned_total;
+        var alignedTotal = raw.aligned;
+        if (!isFinite(Number(alignedTotal)) && isFinite(Number(raw.aligned_total))) alignedTotal = Number(raw.aligned_total);
         if (!isFinite(Number(alignedTotal)) && isFinite(Number(raw.aligned_count))) alignedTotal = Number(raw.aligned_count);
         alignedTotal = isFinite(Number(alignedTotal)) ? Number(alignedTotal) : null;
-        var unalignedTotal = raw.unaligned_total;
+        var unalignedTotal = raw.unaligned;
+        if (!isFinite(Number(unalignedTotal)) && isFinite(Number(raw.unaligned_total))) unalignedTotal = Number(raw.unaligned_total);
         if (!isFinite(Number(unalignedTotal)) && isFinite(Number(raw.unaligned_count))) unalignedTotal = Number(raw.unaligned_count);
         unalignedTotal = isFinite(Number(unalignedTotal)) ? Number(unalignedTotal) : null;
         return {
@@ -307,21 +299,22 @@
         };
       }
       function normalizeTopic(raw) {
+        var topicId = raw.topic_slug || raw.slug || raw.id;
         var topic = {
-          id: raw.slug || raw.id,
-          statement: raw.statement || '',
+          id: topicId,
+          statement: raw.statement_text || raw.statement || '',
           tag: raw.tag || 'topic',
-          routeUrl: raw.route_url || raw.branch_url || null,
-          shareOg: raw.og_image || shareOg({ id: raw.slug || raw.id }),
-          portalUrl: portalUrl({ id: raw.slug || raw.id }),
-          shareUrl: shareUrl({ id: raw.slug || raw.id }),
+          routeUrl: raw.link_url || raw.route_url || raw.branch_url || null,
+          shareOg: raw.og_image || shareOg({ id: topicId }),
+          portalUrl: portalUrl({ id: topicId }),
+          shareUrl: shareUrl({ id: topicId }),
+          promptId: raw.prompt_id || null,
           joinNonce: null,
           joinLinkUrl: null,
           joinAppUrl: null,
           statementId: null,
           etag: null,
-          progress: normalizeProgress(raw.progress || raw.aggregate || {}),
-          receipt: null
+          progress: normalizeProgress(raw.progress || raw.aggregate || raw)
         };
         topic.routeUrl = topicRouteUrl(topic);
         return topic;
@@ -342,7 +335,7 @@
               '<div class="qr">' +
                 '<div class="qr-image" data-role="qr" data-payload="' + escapeHtml(topic.routeUrl) + '" title="' + escapeHtml(topic.routeUrl) + '" aria-label="QR code for ' + escapeHtml(topic.statement) + '"></div>' +
                 '<div class="qr-caption" data-role="qr-caption">Scan to open this topic</div>' +
-                '<div class="route-note" data-install-url="' + escapeHtml(APP_INSTALL_URL) + '">If SomaCheck is installed, this route opens the topic in the app. If not, the install path can continue through Branch or the App Store and return you to this topic.</div>' +
+                '<div class="route-note" data-install-url="' + escapeHtml(APP_INSTALL_URL) + '">If SomaCheck is installed, this route opens the topic in the app. If not, the configured install route can return you to this topic.</div>' +
               '</div>' +
             '</div>' +
             '<div class="actions">' +
@@ -350,8 +343,7 @@
               '<button class="btn btn-secondary share-btn" data-topic-id="' + topic.id + '">Share this World Vibe</button>' +
             '</div>' +
             '<div class="privacy-line">Your identity is not shown here. Results appear only in aggregate. If you install first, limited routing data may be used to return you to this topic.</div>' +
-            '<div class="status" data-role="status"></div>' +
-            '<div class="receipt" data-role="receipt"></div>';
+            '<div class="status" data-role="status"></div>';
 
           container.appendChild(el);
           state.byId[topic.id] = topic;
@@ -379,29 +371,11 @@
         return topicEl.querySelector('[data-role="status"]');
       }
 
-      function getReceiptEl(topicId) {
-        var topicEl = document.getElementById('topic-' + topicId);
-        if (!topicEl) return null;
-        return topicEl.querySelector('[data-role="receipt"]');
-      }
-
       function setStatus(topicId, message, isError) {
         var el = getStatusEl(topicId);
         if (!el) return;
         el.textContent = message || '';
         el.className = 'status' + (isError ? ' error' : '');
-      }
-
-      function setReceipt(topicId, lines) {
-        var el = getReceiptEl(topicId);
-        if (!el) return;
-        if (!lines || !lines.length) {
-          el.innerHTML = '';
-          el.className = 'receipt';
-          return;
-        }
-        el.innerHTML = lines.map(function(line) { return '<div>' + line + '</div>'; }).join('');
-        el.className = 'receipt visible';
       }
 
       function renderQr(topicId, payload) {
@@ -468,67 +442,11 @@
           (countriesHtml ? '<div class="countries">' + countriesHtml + '</div>' : '');
       }
 
-      function buildReceiptLines(topic) {
-        if (!topic.receipt) return [];
-        var receipt = topic.receipt;
-        var lines = [];
-        if (receipt.countedAsNewContributor && receipt.firstPosition) {
-          lines.push('<strong>You&#39;re check-in ' + receipt.firstPosition + ' of ' + receipt.unlockThreshold + '.</strong>');
-          if (receipt.unlocked) {
-            lines.push('World Vibe is live.');
-          } else {
-            var remaining = Math.max(0, receipt.unlockThreshold - receipt.contributorCount);
-            lines.push(remaining + ' more check-ins unlock the World Vibe.');
-          }
-        } else {
-          lines.push('<strong>Your latest check-in is saved.</strong>');
-          if (receipt.unlocked) {
-            lines.push(receipt.contributorCount + ' people have joined.');
-          } else {
-            lines.push(receipt.contributorCount + ' of ' + receipt.unlockThreshold + ' people have joined.');
-          }
-        }
-        lines.push('<span class="privacy-line">Your identity is not shown. Results appear only in aggregate.</span>');
-        return lines;
-      }
-
       function updateTopic(topic) {
         var topicEl = getTopicEl(topic.id);
         if (!topicEl) return;
         var aggregateEl = topicEl.querySelector('[data-role="aggregate"]');
         if (aggregateEl) aggregateEl.innerHTML = renderAggregate(topic);
-        setReceipt(topic.id, buildReceiptLines(topic));
-      }
-
-      function normalizeReceipt(topic, raw) {
-        raw = raw || {};
-        var contributorCount = Number(raw.contributor_count);
-        if (!isFinite(contributorCount)) contributorCount = topic.progress ? topic.progress.contributorCount : 0;
-        var unlockThreshold = Number(raw.unlock_threshold || raw.threshold || DEFAULT_THRESHOLD) || DEFAULT_THRESHOLD;
-        return {
-          saveState: raw.save_state || 'counted',
-          countedAsNewContributor: !!raw.counted_as_new_contributor,
-          firstPosition: isFinite(Number(raw.first_position)) ? Number(raw.first_position) : null,
-          contributorCount: contributorCount,
-          unlockThreshold: unlockThreshold,
-          unlocked: typeof raw.unlocked === 'boolean' ? raw.unlocked : contributorCount >= unlockThreshold,
-          aggregateRevision: Number(raw.aggregate_revision || 0) || 0
-        };
-      }
-
-      function applyReceipt(topic, receipt) {
-        topic.receipt = normalizeReceipt(topic, receipt);
-        topic.progress = normalizeProgress({
-          contributor_count: topic.receipt.contributorCount,
-          threshold: topic.receipt.unlockThreshold,
-          unlocked: topic.receipt.unlocked,
-          aggregate_revision: Math.max(topic.receipt.aggregateRevision, (topic.progress && topic.progress.aggregateRevision) || 0),
-          last_completed_at: (topic.progress && topic.progress.lastCompletedAt) || null,
-          aligned_total: topic.progress && topic.progress.alignedTotal,
-          unaligned_total: topic.progress && topic.progress.unalignedTotal,
-          aligned_pct: topic.progress && topic.progress.alignedPct,
-          countries: topic.progress && topic.progress.countries
-        });
       }
 
       function mergeProgress(topic, raw, response) {
@@ -550,11 +468,6 @@
           var etag = response.headers.get('etag');
           if (etag) topic.etag = etag;
         }
-        if (topic.receipt) {
-          topic.receipt.contributorCount = Math.max(topic.receipt.contributorCount, topic.progress.contributorCount);
-          topic.receipt.unlocked = topic.progress.unlocked;
-          topic.receipt.aggregateRevision = Math.max(topic.receipt.aggregateRevision || 0, topic.progress.aggregateRevision || 0);
-        }
         updateTopic(topic);
       }
 
@@ -575,13 +488,17 @@
           window.location.href = topic.joinAppUrl;
           return;
         }
+        if (!topic.promptId) {
+          setStatus(topic.id, 'This topic is temporarily unavailable.', true);
+          return;
+        }
         if (!topic.joinNonce) topic.joinNonce = createNonce();
         btn.disabled = true;
         setStatus(topic.id, 'Preparing your check-in...', false);
         fetch(STATEMENT_API_URL + '/v1/public/world-vibe/topics/' + encodeURIComponent(topic.id) + '/join', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idempotency_nonce: topic.joinNonce })
+          body: JSON.stringify({ prompt_id: topic.promptId, client_nonce: topic.joinNonce })
         }).then(function(r) {
           if (r.status === 404) {
             setStatus(topic.id, 'This topic has been retired.', true);
@@ -600,13 +517,11 @@
           }
           return r.json().then(function(data) {
             if (data && (data.link_url || data.route_url || data.app_url)) {
-              setStatus(topic.id, '', false);
+              setStatus(topic.id, 'Your check-in is ready in SomaCheck.', false);
               topic.joinLinkUrl = data.link_url || data.route_url || topic.routeUrl;
               topic.joinAppUrl = data.app_url || topic.joinLinkUrl;
               topic.statementId = data.statement_id || data.id || null;
-              applyReceipt(topic, data.receipt || data);
               setAnswerState(topic.id, topic.joinAppUrl);
-              updateTopic(topic);
             } else {
               setStatus(topic.id, 'Something went wrong. Please try again.', true);
               btn.disabled = false;

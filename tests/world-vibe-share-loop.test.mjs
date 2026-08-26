@@ -19,70 +19,129 @@ const [source, topicsJson] = await Promise.all([
 ]);
 
 assert.doesNotMatch(source, /No tracking|Your answer is anonymous|Share this topic|Test it against your own body|Be one of the first 5/i, 'portal source must not regress to the retired copy');
+assert.doesNotMatch(source, /data-role="receipt"|You're check-in|first_position|counted_as_new_contributor|idempotency_nonce/i, 'public web must not handle owner receipt state');
+assert.match(source, /prompt_id/, 'join flow must send prompt_id');
+assert.match(source, /client_nonce/, 'join flow must send client_nonce');
 assert.match(source, /Share this World Vibe/, 'portal must expose the concise share CTA');
 assert.match(source, /setInterval\(function\(\) \{[\s\S]*POLL_MS\);/, 'portal must poll on a 5 to 10 second timer');
 
 const branchBase = 'https://link.somacheck.test';
-const installUrl = 'https://apps.apple.com/app/id6747758187';
+const installUrl = 'https://apps.apple.com/app/id6792978184';
 const initialTime = '2026-08-26T13:00:00.000Z';
 const firstRefreshTime = '2026-08-26T13:01:00.000Z';
 const unlockedTime = '2026-08-26T13:03:00.000Z';
 const expectedInitialTimestamp = `Last check-in ${new Date(initialTime).toLocaleString()}`;
 const expectedUnlockedTimestamp = `Last check-in ${new Date(unlockedTime).toLocaleString()}`;
 const expectedStableRoute = `${branchBase}/world-vibe/share/gut-vs-dashboard`;
+const expectedFallbackRoute = `${branchBase}/world-vibe/share/ai-at-work`;
 const expectedPersonalAppRoute = 'somacheck://s/personal-gut-token';
 const joinBodies = [];
 const joinRequests = [];
 const progressHits = new Map();
 const requestLog = [];
 
+const publicTopicsPayload = {
+  topics: [
+    {
+      topic_slug: 'ai-at-work',
+      prompt_id: 'prompt_ai_001',
+      statement_text: 'I feel hopeful about AI at work',
+      link_url: `${branchBase}/world-vibe/share/ai-at-work`,
+      contributor_count: 0,
+      unlock_threshold: 5,
+      remaining_count: 5,
+      unlocked: false,
+      aggregate_revision: 0,
+      last_completed_at: null,
+      aligned: null,
+      unaligned: null
+    },
+    {
+      topic_slug: 'gut-vs-dashboard',
+      prompt_id: 'prompt_gut_001',
+      statement_text: 'I trust my gut more than my dashboard',
+      link_url: expectedStableRoute,
+      contributor_count: 1,
+      unlock_threshold: 5,
+      remaining_count: 4,
+      unlocked: false,
+      aggregate_revision: 1,
+      last_completed_at: initialTime,
+      aligned: null,
+      unaligned: null
+    },
+    {
+      topic_slug: 'present-leadership',
+      prompt_id: 'prompt_present_001',
+      statement_text: 'I am fully present with the people I lead',
+      link_url: `${branchBase}/world-vibe/share/present-leadership`,
+      contributor_count: 0,
+      unlock_threshold: 5,
+      remaining_count: 5,
+      unlocked: false,
+      aggregate_revision: 0,
+      last_completed_at: null,
+      aligned: null,
+      unaligned: null
+    }
+  ]
+};
+
 const progressSeries = {
   'ai-at-work': [
     {
       contributor_count: 0,
-      threshold: 5,
+      unlock_threshold: 5,
       remaining_count: 5,
       unlocked: false,
       aggregate_revision: 0,
-      last_completed_at: null
+      last_completed_at: null,
+      aligned: null,
+      unaligned: null
     }
   ],
   'gut-vs-dashboard': [
     {
       contributor_count: 1,
-      threshold: 5,
+      unlock_threshold: 5,
       remaining_count: 4,
       unlocked: false,
       aggregate_revision: 1,
-      last_completed_at: initialTime
+      last_completed_at: initialTime,
+      aligned: null,
+      unaligned: null
     },
     {
       contributor_count: 3,
-      threshold: 5,
+      unlock_threshold: 5,
       remaining_count: 2,
       unlocked: false,
       aggregate_revision: 3,
-      last_completed_at: firstRefreshTime
+      last_completed_at: firstRefreshTime,
+      aligned: null,
+      unaligned: null
     },
     {
       contributor_count: 5,
-      threshold: 5,
+      unlock_threshold: 5,
       remaining_count: 0,
       unlocked: true,
       aggregate_revision: 5,
       last_completed_at: unlockedTime,
-      aligned_total: 3,
-      unaligned_total: 2
+      aligned: 3,
+      unaligned: 2
     }
   ],
   'present-leadership': [
     {
       contributor_count: 0,
-      threshold: 5,
+      unlock_threshold: 5,
       remaining_count: 5,
       unlocked: false,
       aggregate_revision: 0,
-      last_completed_at: null
+      last_completed_at: null,
+      aligned: null,
+      unaligned: null
     }
   ]
 };
@@ -107,88 +166,147 @@ function withInjectedConfig(html, origin) {
   return html.replace('</head>', `${injected}\n</head>`);
 }
 
-function nextProgress(slug) {
-  const series = progressSeries[slug];
+function nextProgress(slug, seriesMap) {
+  const series = seriesMap[slug];
   const count = progressHits.get(slug) || 0;
   progressHits.set(slug, count + 1);
   return series[Math.min(count, series.length - 1)];
 }
 
-const server = createServer(async (request, response) => {
-  const url = new URL(request.url, 'http://127.0.0.1');
-  requestLog.push({ method: request.method, pathname: url.pathname });
+async function startPortalServer(options) {
+  const topicsStatus = options.topicsStatus ?? 200;
+  const topicsBody = options.topicsBody ?? publicTopicsPayload;
+  const joinResponse = options.joinResponse ?? {
+    statement_id: 'stmt_gut_001',
+    link_url: 'https://go.somacheck.com/s/personal-gut-token',
+    app_url: expectedPersonalAppRoute
+  };
+  const seriesMap = options.progressSeries ?? progressSeries;
 
-  if (url.pathname === '/api/v1/public/world-vibe/topics') {
-    response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(topicsJson);
-    return;
-  }
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url, 'http://127.0.0.1');
+    requestLog.push({ method: request.method, pathname: url.pathname });
 
-  if (url.pathname.match(/^\/api\/v1\/public\/world-vibe\/topics\/[^/]+\/progress$/)) {
-    const slug = decodeURIComponent(url.pathname.split('/')[6]);
-    const payload = nextProgress(slug);
-    response.writeHead(200, {
-      'content-type': 'application/json',
-      etag: `"${slug}-${payload.aggregate_revision}"`
-    });
-    response.end(JSON.stringify(payload));
-    return;
-  }
+    if (url.pathname === '/api/v1/public/world-vibe/topics') {
+      response.writeHead(topicsStatus, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(topicsBody));
+      return;
+    }
 
-  if (url.pathname === '/api/v1/public/world-vibe/topics/gut-vs-dashboard/join' && request.method === 'POST') {
-    let body = '';
-    request.on('data', (chunk) => { body += chunk; });
-    request.on('end', () => {
-      joinRequests.push(url.pathname);
-      joinBodies.push(JSON.parse(body));
+    if (url.pathname.match(/^\/api\/v1\/public\/world-vibe\/topics\/[^/]+\/progress$/)) {
+      const slug = decodeURIComponent(url.pathname.split('/')[6]);
+      const payload = nextProgress(slug, seriesMap);
+      response.writeHead(200, {
+        'content-type': 'application/json',
+        etag: `"${slug}-${payload.aggregate_revision}"`
+      });
+      response.end(JSON.stringify(payload));
+      return;
+    }
+
+    if (url.pathname === '/api/v1/public/world-vibe/topics/gut-vs-dashboard/join' && request.method === 'POST') {
+      let body = '';
+      request.on('data', (chunk) => { body += chunk; });
+      request.on('end', () => {
+        joinRequests.push(url.pathname);
+        joinBodies.push(JSON.parse(body));
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify(joinResponse));
+      });
+      return;
+    }
+
+    if (url.pathname === '/world-vibe/topics.json') {
       response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({
-        statement_id: 'stmt_gut_001',
-        link_url: 'https://go.somacheck.com/s/personal-gut-token',
-        app_url: expectedPersonalAppRoute,
-        receipt: {
-          save_state: 'counted',
-          counted_as_new_contributor: true,
-          first_position: 2,
-          contributor_count: 2,
+      response.end(topicsJson);
+      return;
+    }
+
+    if (url.pathname === '/world-vibe/' || url.pathname === '/world-vibe') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.end(withInjectedConfig(source, `http://127.0.0.1:${server.address().port}`));
+      return;
+    }
+
+    response.writeHead(404);
+    response.end('not found');
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  return server;
+}
+
+async function closeServer(server) {
+  await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+}
+
+async function runFixtureFallbackProof(browser) {
+  progressHits.clear();
+  const fallbackServer = await startPortalServer({
+    topicsStatus: 503,
+    topicsBody: { error: 'unavailable' },
+    progressSeries: {
+      'ai-at-work': [
+        {
+          contributor_count: 0,
           unlock_threshold: 5,
+          remaining_count: 5,
           unlocked: false,
-          aggregate_revision: 2
+          aggregate_revision: 0,
+          last_completed_at: null,
+          aligned: null,
+          unaligned: null
         }
-      }));
-    });
-    return;
+      ],
+      'gut-vs-dashboard': [
+        {
+          contributor_count: 0,
+          unlock_threshold: 5,
+          remaining_count: 5,
+          unlocked: false,
+          aggregate_revision: 0,
+          last_completed_at: null,
+          aligned: null,
+          unaligned: null
+        }
+      ],
+      'present-leadership': [
+        {
+          contributor_count: 0,
+          unlock_threshold: 5,
+          remaining_count: 5,
+          unlocked: false,
+          aggregate_revision: 0,
+          last_completed_at: null,
+          aligned: null,
+          unaligned: null
+        }
+      ]
+    }
+  });
+  const origin = `http://127.0.0.1:${fallbackServer.address().port}`;
+  const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+
+  try {
+    await page.goto(`${origin}/world-vibe/?t=ai-at-work`, { waitUntil: 'networkidle' });
+    await page.locator('#topic-ai-at-work').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#topic-ai-at-work .statement').textContent(), 'I feel hopeful about AI at work', 'static fixture array must still normalize into portal statements');
+    assert.equal(await page.locator('#topic-ai-at-work [data-role="qr"]').getAttribute('data-payload'), expectedFallbackRoute, 'static fixture topics must derive the stable share route when no public link_url is provided');
+    return { fallbackNormalized: true };
+  } finally {
+    await page.close();
+    await closeServer(fallbackServer);
   }
+}
 
-  if (url.pathname === '/world-vibe/topics.json') {
-    response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(topicsJson);
-    return;
-  }
-
-  if (url.pathname === '/world-vibe/' || url.pathname === '/world-vibe') {
-    const configured = withInjectedConfig(source, `http://127.0.0.1:${address.port}`);
-    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    response.end(configured);
-    return;
-  }
-
-  response.writeHead(404);
-  response.end('not found');
-});
-
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-const address = server.address();
-const origin = `http://127.0.0.1:${address.port}`;
-const browser = await chromium.launch({ headless: true });
-
-async function runMutationProof() {
+async function runMutationProof(browser) {
+  progressHits.clear();
   const mutated = source.replace('Share this World Vibe', 'Share this topic');
-  const mutationServer = createServer((request, response) => {
+  const server = createServer((request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
     if (url.pathname === '/api/v1/public/world-vibe/topics') {
       response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(topicsJson);
+      response.end(JSON.stringify(publicTopicsPayload));
       return;
     }
     if (url.pathname.match(/^\/api\/v1\/public\/world-vibe\/topics\/[^/]+\/progress$/)) {
@@ -197,22 +315,26 @@ async function runMutationProof() {
       response.end(JSON.stringify(progressSeries[slug][0]));
       return;
     }
+    if (url.pathname === '/world-vibe/topics.json') {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(topicsJson);
+      return;
+    }
     if (url.pathname === '/world-vibe/' || url.pathname === '/world-vibe') {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      response.end(withInjectedConfig(mutated, `http://127.0.0.1:${mutationAddress.port}`));
+      response.end(withInjectedConfig(mutated, `http://127.0.0.1:${server.address().port}`));
       return;
     }
     response.writeHead(404);
     response.end('not found');
   });
 
-  await new Promise((resolve) => mutationServer.listen(0, '127.0.0.1', resolve));
-  const mutationAddress = mutationServer.address();
-  const mutationOrigin = `http://127.0.0.1:${mutationAddress.port}`;
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
 
   try {
-    await page.goto(`${mutationOrigin}/world-vibe/`, { waitUntil: 'networkidle' });
+    await page.goto(`${origin}/world-vibe/`, { waitUntil: 'networkidle' });
     await page.locator('#topic-gut-vs-dashboard').waitFor({ state: 'visible' });
     let failedAsExpected = false;
     try {
@@ -224,43 +346,65 @@ async function runMutationProof() {
     return { failedAsExpected };
   } finally {
     await page.close();
-    await new Promise((resolve, reject) => mutationServer.close((error) => error ? reject(error) : resolve()));
+    await closeServer(server);
   }
 }
 
-try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
-  await page.goto(`${origin}/world-vibe/?t=gut-vs-dashboard`, { waitUntil: 'networkidle' });
+const browser = await chromium.launch({ headless: true });
+const portalServer = await startPortalServer({
+  joinResponse: {
+    statement_id: 'stmt_gut_001',
+    link_url: 'https://go.somacheck.com/s/personal-gut-token',
+    app_url: expectedPersonalAppRoute,
+    receipt: {
+      first_position: 2,
+      counted_as_new_contributor: true
+    }
+  }
+});
 
+try {
+  progressHits.clear();
+  const origin = `http://127.0.0.1:${portalServer.address().port}`;
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
+
+  await page.goto(`${origin}/world-vibe/?t=gut-vs-dashboard`, { waitUntil: 'networkidle' });
   await page.locator('#topic-gut-vs-dashboard').waitFor({ state: 'visible' });
+
   assert.equal(joinRequests.length, 0, 'page load must not issue a join request');
   assert.equal(requestLog.filter((entry) => entry.pathname.endsWith('/join')).length, 0, 'refresh and initial load must not create a statement');
+  assert.equal(await page.locator('#topic-gut-vs-dashboard .statement').textContent(), 'I trust my gut more than my dashboard', 'statement_text from the public topics endpoint must render exactly');
 
   const aggregate = page.locator('#topic-gut-vs-dashboard [data-role="aggregate"]');
   await assert.doesNotReject(() => aggregate.waitFor({ state: 'visible' }));
-  assert.match(await aggregate.textContent(), /1 of 5/i, 'locked public progress must show the truthful count');
+  assert.match(await aggregate.textContent(), /1 of 5/i, 'locked public progress must show the truthful count from contributor_count and unlock_threshold');
   assert.doesNotMatch(await aggregate.textContent(), /Aligned|Unaligned/i, 'split must remain hidden before unlock');
 
   const qr = page.locator('#topic-gut-vs-dashboard [data-role="qr"]');
-  assert.equal(await qr.getAttribute('data-payload'), expectedStableRoute, 'QR payload must stay on the stable public topic route');
+  assert.equal(await qr.getAttribute('data-payload'), expectedStableRoute, 'public link_url must become the stable QR payload without substitution');
   await page.evaluate(() => {
     document.querySelector('#topic-gut-vs-dashboard [data-role="qr"]').setAttribute('data-marker', 'kept');
   });
 
   const routeNote = page.locator('#topic-gut-vs-dashboard .route-note');
-  assert.equal(await routeNote.getAttribute('data-install-url'), installUrl, 'route seam must carry the configured install target');
-  assert.match(await page.locator('#topic-gut-vs-dashboard .privacy-line').first().textContent(), /limited routing data may be used/i, 'privacy disclosure must describe the install-return behavior');
+  assert.equal(await routeNote.getAttribute('data-install-url'), installUrl, 'route seam must carry the configured App Store target');
+  assert.match(await page.locator('#topic-gut-vs-dashboard .privacy-line').textContent(), /limited routing data may be used/i, 'privacy disclosure must describe the install-return behavior');
   assert.equal(await page.locator('#topic-gut-vs-dashboard .share-btn').textContent(), 'Share this World Vibe', 'share CTA label must stay concise');
-  assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').textContent(), 'Start your check-in', 'join CTA must be explicit instead of auto-issuing');
+  assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').textContent(), 'Start your check-in', 'join CTA must stay explicit');
   assert.equal(await page.locator('#last-updated').textContent(), expectedInitialTimestamp, 'timestamp must use the last actual completion time, not fetch time');
+  assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role=\"status\"]').textContent(), '', 'initial state must not claim a personal status');
+  assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role=\"receipt\"]').count(), 0, 'public web must not render an owner receipt area');
 
   await page.locator('#topic-gut-vs-dashboard .answer-btn').click();
   await page.waitForFunction(() => document.querySelector('#topic-gut-vs-dashboard .answer-btn').tagName === 'A');
   assert.equal(joinRequests.length, 1, 'explicit action must issue exactly one join request');
-  assert.match(JSON.stringify(joinBodies[0]), /idempotency_nonce/, 'join request must include an idempotency nonce');
+  assert.deepEqual(Object.keys(joinBodies[0]).sort(), ['client_nonce', 'prompt_id'], 'join request body must contain only the frozen contract keys');
+  assert.equal(joinBodies[0].prompt_id, 'prompt_gut_001', 'join request must send the exact prompt_id from the public topics contract');
+  assert.equal(typeof joinBodies[0].client_nonce, 'string', 'join request must send a client_nonce string');
+  assert.ok(joinBodies[0].client_nonce.length > 8, 'client_nonce must be non-trivial');
   assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').getAttribute('href'), expectedPersonalAppRoute, 'personal app route must be preserved after join');
-  assert.match(await page.locator('#topic-gut-vs-dashboard [data-role="receipt"]').textContent(), /You're check-in 2 of 5\./, 'owner receipt must expose first position only after the confirmed join');
-  assert.match(await page.locator('#topic-gut-vs-dashboard [data-role="receipt"]').textContent(), /3 more check-ins unlock the World Vibe\./, 'pre-unlock share loop must show the remaining count');
+  assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role=\"status\"]').textContent(), 'Your check-in is ready in SomaCheck.', 'post-join status must stay neutral');
+  assert.doesNotMatch(await page.locator('#topic-gut-vs-dashboard').textContent(), /You're check-in|first position|2 of 5\./i, 'public web must not claim a personal position after join even if stray receipt data appears');
 
   await page.evaluate(() => window.__worldVibePoll());
   await page.waitForFunction(() => document.querySelector('#topic-gut-vs-dashboard [data-role="aggregate"]').textContent.includes('3 of 5'));
@@ -273,24 +417,28 @@ try {
   const unlockedAggregate = await aggregate.textContent();
   assert.match(unlockedAggregate, /Aligned/i, 'split must appear after unlock');
   assert.match(unlockedAggregate, /Unaligned/i, 'split must show both sides after unlock');
-  assert.match(unlockedAggregate, /5check-ins|5 check-ins/i, 'unlocked aggregate must still show the full contributor count');
+  assert.match(unlockedAggregate, /60%/, 'aligned count must normalize from the frozen aligned field');
+  assert.match(unlockedAggregate, /40%/, 'unaligned count must normalize from the frozen unaligned field');
   assert.equal(await page.locator('#last-updated').textContent(), expectedUnlockedTimestamp, 'later refreshes must move to the newest actual completion time');
   assert.equal(await qr.getAttribute('data-payload'), expectedStableRoute, 'stable route must survive multiple refresh cycles');
   assert.equal(await qr.getAttribute('data-marker'), 'kept', 'second refresh must still avoid replacing the QR node');
   assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').getAttribute('href'), expectedPersonalAppRoute, 'personal route must still be available after unlock');
 
-  const mutationProof = await runMutationProof();
+  const fixtureFallback = await runFixtureFallbackProof(browser);
+  const mutationProof = await runMutationProof(browser);
 
   console.log(JSON.stringify({
     passed: true,
-    joinRequests: joinRequests.length,
-    firstJoinNoncePresent: Boolean(joinBodies[0] && joinBodies[0].idempotency_nonce),
+    exactJoinBody: joinBodies[0],
     stableRoute: expectedStableRoute,
-    personalRoute: expectedPersonalAppRoute,
+    fallbackRoute: expectedFallbackRoute,
     lastActualCompletion: expectedUnlockedTimestamp,
+    fixtureFallback,
     mutationProof
   }, null, 2));
+
+  await page.close();
 } finally {
   await browser.close();
-  await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  await closeServer(portalServer);
 }
