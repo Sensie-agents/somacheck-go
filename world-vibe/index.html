@@ -232,6 +232,7 @@
       var STATEMENT_API_URL = (typeof window !== 'undefined' && window.SOMACHECK_API_BASE) || 'https://pbldcmniommltbdwuykk.supabase.co/functions/v1/statement-api';
       var POLL_MS = 7000;
       var DEFAULT_THRESHOLD = 5;
+      var SESSION_NONCE_STORAGE_KEY = 'world-vibe-session-nonce';
       // Runtime seam can cut over to the App Store after publication.
       // Until then, the working public fallback is TestFlight.
       var APP_INSTALL_URL = (typeof window !== 'undefined' && window.SOMACHECK_INSTALL_URL) || 'https://testflight.apple.com/join/C4mAH3zz';
@@ -239,7 +240,8 @@
       var state = {
         topics: [],
         byId: {},
-        initialized: false
+        initialized: false,
+        sessionNonce: null
       };
 
       function shareUrl(topic) { return '/world-vibe/share/' + encodeURIComponent(topic.id); }
@@ -266,6 +268,23 @@
           return crypto.randomUUID();
         }
         return 'wv-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+      }
+      function getSessionNonce() {
+        if (state.sessionNonce) return state.sessionNonce;
+        var nonce = null;
+        try {
+          if (typeof window !== 'undefined' && window.sessionStorage) {
+            nonce = window.sessionStorage.getItem(SESSION_NONCE_STORAGE_KEY);
+            if (!nonce) {
+              nonce = createNonce();
+              window.sessionStorage.setItem(SESSION_NONCE_STORAGE_KEY, nonce);
+            }
+          }
+        } catch (error) {
+          nonce = null;
+        }
+        state.sessionNonce = nonce || createNonce();
+        return state.sessionNonce;
       }
       function formatTimestamp(ts) {
         if (!ts) return 'Waiting for the first completed check-in';
@@ -495,12 +514,13 @@
           return;
         }
         if (!topic.joinNonce) topic.joinNonce = createNonce();
+        var sessionNonce = getSessionNonce();
         btn.disabled = true;
         setStatus(topic.id, 'Preparing your check-in...', false);
         fetch(STATEMENT_API_URL + '/v1/public/world-vibe/topics/' + encodeURIComponent(topic.id) + '/join', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt_id: topic.promptId, client_nonce: topic.joinNonce })
+          body: JSON.stringify({ prompt_id: topic.promptId, client_nonce: topic.joinNonce, session_nonce: sessionNonce })
         }).then(function(r) {
           if (r.status === 404) {
             setStatus(topic.id, 'This topic has been retired.', true);

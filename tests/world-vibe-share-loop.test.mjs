@@ -22,6 +22,9 @@ assert.doesNotMatch(source, /No tracking|Your answer is anonymous|Share this top
 assert.doesNotMatch(source, /data-role="receipt"|You're check-in|first_position|counted_as_new_contributor|idempotency_nonce/i, 'public web must not handle owner receipt state');
 assert.match(source, /prompt_id/, 'join flow must send prompt_id');
 assert.match(source, /client_nonce/, 'join flow must send client_nonce');
+assert.match(source, /session_nonce/, 'join flow must send session_nonce');
+assert.match(source, /sessionStorage/, 'session nonce must be scoped to sessionStorage');
+assert.doesNotMatch(source, /localStorage|document\.cookie/, 'session nonce must not use persistent browser tracking storage');
 assert.match(source, /Share this World Vibe/, 'portal must expose the concise share CTA');
 assert.match(source, /setInterval\(function\(\) \{[\s\S]*POLL_MS\);/, 'portal must poll on a 5 to 10 second timer');
 
@@ -38,6 +41,7 @@ const expectedFallbackRoute = `${branchBase}/world-vibe/share/ai-at-work`;
 const expectedPersonalAppRoute = 'somacheck://s/personal-gut-token';
 const joinBodies = [];
 const joinRequests = [];
+const joinTopics = [];
 const progressHits = new Map();
 const requestLog = [];
 
@@ -205,13 +209,19 @@ async function startPortalServer(options) {
       return;
     }
 
-    if (url.pathname === '/api/v1/public/world-vibe/topics/gut-vs-dashboard/join' && request.method === 'POST') {
+    if (url.pathname.match(/^\/api\/v1\/public\/world-vibe\/topics\/[^/]+\/join$/) && request.method === 'POST') {
       let body = '';
       request.on('data', (chunk) => { body += chunk; });
       request.on('end', () => {
+        const topicSlug = decodeURIComponent(url.pathname.split('/')[6]);
         joinRequests.push(url.pathname);
+        joinTopics.push(topicSlug);
         joinBodies.push(JSON.parse(body));
         response.writeHead(200, { 'content-type': 'application/json' });
+        if (typeof joinResponse === 'function') {
+          response.end(JSON.stringify(joinResponse(topicSlug)));
+          return;
+        }
         response.end(JSON.stringify(joinResponse));
       });
       return;
@@ -353,14 +363,23 @@ async function runMutationProof(browser) {
 
 const browser = await chromium.launch({ headless: true });
 const portalServer = await startPortalServer({
-  joinResponse: {
-    statement_id: 'stmt_gut_001',
-    link_url: 'https://go.somacheck.com/s/personal-gut-token',
-    app_url: expectedPersonalAppRoute,
-    receipt: {
-      first_position: 2,
-      counted_as_new_contributor: true
+  joinResponse: function(topicSlug) {
+    if (topicSlug === 'gut-vs-dashboard') {
+      return {
+        statement_id: 'stmt_gut_001',
+        link_url: 'https://go.somacheck.com/s/personal-gut-token',
+        app_url: expectedPersonalAppRoute,
+        receipt: {
+          first_position: 2,
+          counted_as_new_contributor: true
+        }
+      };
     }
+    return {
+      statement_id: 'stmt_ai_001',
+      link_url: 'https://go.somacheck.com/s/personal-ai-token',
+      app_url: 'somacheck://s/personal-ai-token'
+    };
   }
 });
 
@@ -399,13 +418,34 @@ try {
   await page.locator('#topic-gut-vs-dashboard .answer-btn').click();
   await page.waitForFunction(() => document.querySelector('#topic-gut-vs-dashboard .answer-btn').tagName === 'A');
   assert.equal(joinRequests.length, 1, 'explicit action must issue exactly one join request');
-  assert.deepEqual(Object.keys(joinBodies[0]).sort(), ['client_nonce', 'prompt_id'], 'join request body must contain only the frozen contract keys');
+  assert.deepEqual(Object.keys(joinBodies[0]).sort(), ['client_nonce', 'prompt_id', 'session_nonce'], 'join request body must contain only the abuse-reviewed contract keys');
   assert.equal(joinBodies[0].prompt_id, 'prompt_gut_001', 'join request must send the exact prompt_id from the public topics contract');
   assert.equal(typeof joinBodies[0].client_nonce, 'string', 'join request must send a client_nonce string');
   assert.ok(joinBodies[0].client_nonce.length > 8, 'client_nonce must be non-trivial');
+  assert.equal(typeof joinBodies[0].session_nonce, 'string', 'join request must send a session_nonce string');
+  assert.ok(joinBodies[0].session_nonce.length > 8, 'session_nonce must be non-trivial');
   assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').getAttribute('href'), expectedPersonalAppRoute, 'personal app route must be preserved after join');
   assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role=\"status\"]').textContent(), 'Your check-in is ready in SomaCheck.', 'post-join status must stay neutral');
   assert.doesNotMatch(await page.locator('#topic-gut-vs-dashboard').textContent(), /You're check-in|first position|2 of 5\./i, 'public web must not claim a personal position after join even if stray receipt data appears');
+
+  await page.locator('#topic-ai-at-work .answer-btn').click();
+  await page.waitForFunction(() => document.querySelector('#topic-ai-at-work .answer-btn').tagName === 'A');
+  assert.equal(joinRequests.length, 2, 'second distinct join intent in the same browser session must also post');
+  assert.deepEqual(Object.keys(joinBodies[1]).sort(), ['client_nonce', 'prompt_id', 'session_nonce'], 'every join request must keep the exact three-key contract');
+  assert.equal(joinBodies[1].prompt_id, 'prompt_ai_001', 'second join must use the second topic prompt_id');
+  assert.notEqual(joinBodies[1].client_nonce, joinBodies[0].client_nonce, 'client_nonce must remain unique per join intent');
+  assert.equal(joinBodies[1].session_nonce, joinBodies[0].session_nonce, 'session_nonce must stay stable across join intents in one browser session');
+  assert.deepEqual(joinTopics, ['gut-vs-dashboard', 'ai-at-work'], 'two separate join intents should be captured in request order');
+  const storageSnapshot = await page.evaluate(() => ({
+    localStorageKeys: Object.keys(window.localStorage),
+    cookie: document.cookie,
+    sessionKeys: Object.keys(window.sessionStorage),
+    sessionNonce: window.sessionStorage.getItem('world-vibe-session-nonce')
+  }));
+  assert.deepEqual(storageSnapshot.localStorageKeys, [], 'no persistent localStorage tracking keys may be written');
+  assert.equal(storageSnapshot.cookie, '', 'join flow must not create tracking cookies');
+  assert.deepEqual(storageSnapshot.sessionKeys, ['world-vibe-session-nonce'], 'only the session nonce may be stored for this tab session');
+  assert.equal(storageSnapshot.sessionNonce, joinBodies[0].session_nonce, 'sessionStorage nonce must match the posted session_nonce');
 
   await page.evaluate(() => window.__worldVibePoll());
   await page.waitForFunction(() => document.querySelector('#topic-gut-vs-dashboard [data-role="aggregate"]').textContent.includes('3 of 5'));
@@ -431,6 +471,7 @@ try {
   console.log(JSON.stringify({
     passed: true,
     exactJoinBody: joinBodies[0],
+    secondJoinBody: joinBodies[1],
     stableRoute: expectedStableRoute,
     fallbackRoute: expectedFallbackRoute,
     lastActualCompletion: expectedUnlockedTimestamp,
