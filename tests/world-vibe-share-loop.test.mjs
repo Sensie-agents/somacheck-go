@@ -181,6 +181,7 @@ function nextProgress(slug, seriesMap) {
 async function startPortalServer(options) {
   const topicsStatus = options.topicsStatus ?? 200;
   const topicsBody = options.topicsBody ?? publicTopicsPayload;
+  const joinStatus = options.joinStatus ?? 200;
   const joinResponse = options.joinResponse ?? {
     statement_id: 'stmt_gut_001',
     link_url: 'https://go.somacheck.com/s/personal-gut-token',
@@ -217,7 +218,7 @@ async function startPortalServer(options) {
         joinRequests.push(url.pathname);
         joinTopics.push(topicSlug);
         joinBodies.push(JSON.parse(body));
-        response.writeHead(200, { 'content-type': 'application/json' });
+        response.writeHead(joinStatus, { 'content-type': 'application/json' });
         if (typeof joinResponse === 'function') {
           response.end(JSON.stringify(joinResponse(topicSlug)));
           return;
@@ -361,6 +362,48 @@ async function runMutationProof(browser) {
   }
 }
 
+async function runChallengeRequiredProof(browser) {
+  progressHits.clear();
+  const joinStart = joinRequests.length;
+  const requestStart = requestLog.length;
+  const challengeServer = await startPortalServer({
+    joinStatus: 403,
+    joinResponse: function() {
+      return { error: 'challenge_required' };
+    }
+  });
+  const origin = `http://127.0.0.1:${challengeServer.address().port}`;
+  const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+
+  try {
+    await page.goto(`${origin}/world-vibe/?t=gut-vs-dashboard`, { waitUntil: 'networkidle' });
+    await page.locator('#topic-gut-vs-dashboard').waitFor({ state: 'visible' });
+    await page.locator('#topic-gut-vs-dashboard .answer-btn').click();
+    await page.waitForFunction(function() {
+      var statusEl = document.querySelector('#topic-gut-vs-dashboard [data-role="status"]');
+      return statusEl && statusEl.textContent === 'This check-in could not be opened right now. Please try again later.';
+    });
+    await page.waitForTimeout(350);
+
+    const joinDelta = joinRequests.length - joinStart;
+    const requestDelta = requestLog.slice(requestStart).filter(function(entry) {
+      return entry.pathname.endsWith('/join');
+    }).length;
+    assert.equal(joinDelta, 1, 'challenge_required must trigger exactly one join attempt');
+    assert.equal(requestDelta, 1, 'challenge_required must not be retried automatically');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').evaluate(function(node) { return node.tagName; }), 'BUTTON', 'challenge_required must fail closed without issuing a statement link');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').textContent(), 'Start your check-in', 'challenge_required must preserve the explicit join action');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').isDisabled(), false, 'challenge_required should allow a later manual retry');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="status"]').textContent(), 'This check-in could not be opened right now. Please try again later.', 'challenge_required must surface its own fail-closed copy');
+    assert.notEqual(await page.locator('#topic-gut-vs-dashboard [data-role="status"]').textContent(), 'the world is busy today, come back tomorrow', 'challenge_required copy must stay distinct from the 429 quota path');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="qr"]').getAttribute('data-payload'), expectedStableRoute, 'challenge_required must not replace the stable topic route');
+    return { recognized: true, joinDelta: joinDelta, requestDelta: requestDelta };
+  } finally {
+    await page.close();
+    await closeServer(challengeServer);
+  }
+}
+
 const browser = await chromium.launch({ headless: true });
 const portalServer = await startPortalServer({
   joinResponse: function(topicSlug) {
@@ -466,6 +509,7 @@ try {
   assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').getAttribute('href'), expectedPersonalAppRoute, 'personal route must still be available after unlock');
 
   const fixtureFallback = await runFixtureFallbackProof(browser);
+  const challengeRequired = await runChallengeRequiredProof(browser);
   const mutationProof = await runMutationProof(browser);
 
   console.log(JSON.stringify({
@@ -476,6 +520,7 @@ try {
     fallbackRoute: expectedFallbackRoute,
     lastActualCompletion: expectedUnlockedTimestamp,
     fixtureFallback,
+    challengeRequired,
     mutationProof
   }, null, 2));
 

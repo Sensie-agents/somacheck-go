@@ -522,22 +522,33 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ prompt_id: topic.promptId, client_nonce: topic.joinNonce, session_nonce: sessionNonce })
         }).then(function(r) {
-          if (r.status === 404) {
-            setStatus(topic.id, 'This topic has been retired.', true);
-            btn.disabled = false;
-            return;
-          }
-          if (r.status === 429) {
-            setStatus(topic.id, 'the world is busy today, come back tomorrow', false);
-            btn.disabled = false;
-            return;
-          }
-          if (!r.ok) {
-            setStatus(topic.id, 'Something went wrong. Please try again.', true);
-            btn.disabled = false;
-            return;
-          }
-          return r.json().then(function(data) {
+          return r.text().then(function(text) {
+            var data = null;
+            try {
+              data = text ? JSON.parse(text) : null;
+            } catch (error) {
+              data = null;
+            }
+            if (data && data.error === 'challenge_required') {
+              setStatus(topic.id, 'This check-in could not be opened right now. Please try again later.', true);
+              btn.disabled = false;
+              return;
+            }
+            if (r.status === 404) {
+              setStatus(topic.id, 'This topic has been retired.', true);
+              btn.disabled = false;
+              return;
+            }
+            if (r.status === 429) {
+              setStatus(topic.id, 'the world is busy today, come back tomorrow', false);
+              btn.disabled = false;
+              return;
+            }
+            if (!r.ok) {
+              setStatus(topic.id, 'Something went wrong. Please try again.', true);
+              btn.disabled = false;
+              return;
+            }
             if (data && (data.link_url || data.route_url || data.app_url)) {
               setStatus(topic.id, 'Your check-in is ready in SomaCheck.', false);
               topic.joinLinkUrl = data.link_url || data.route_url || topic.routeUrl;
