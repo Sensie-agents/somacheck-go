@@ -236,6 +236,8 @@
       // Runtime seam can cut over to the App Store after publication.
       // Until then, the working public fallback is TestFlight.
       var APP_INSTALL_URL = (typeof window !== 'undefined' && window.SOMACHECK_INSTALL_URL) || 'https://testflight.apple.com/join/C4mAH3zz';
+      // The configured cross-origin Branch smart-link origin. It only decides which
+      // route_url origin may qualify for one-tap; it never rewrites the stable share route.
       var BRANCH_ROUTE_BASE = (typeof window !== 'undefined' && window.SOMACHECK_BRANCH_ROUTE_BASE) || '';
       var SMART_ROUTE_ORIGIN = '';
       try {
@@ -259,11 +261,11 @@
         }
         return 'https://go.somacheck.com' + path;
       }
+      // The stable public QR/share route: a raw stable link_url or branch_url when the
+      // topic already carries one, otherwise this page's own origin plus the share path.
+      // This is the same web origin the backend uses for $canonical_url and $fallback_url.
       function topicRouteUrl(topic) {
         if (topic.routeUrl) return topic.routeUrl;
-        if (BRANCH_ROUTE_BASE) {
-          return BRANCH_ROUTE_BASE.replace(/\/$/, '') + shareUrl(topic);
-        }
         return absolute(shareUrl(topic));
       }
       // Branch long-link path: /a/<public key>, where the key matches the backend
@@ -298,6 +300,9 @@
           return null;
         }
         if (parsed.protocol !== 'https:') return null;
+        // The backend builder never emits userinfo or a fragment; either could carry an
+        // identity or tracking token that the query allowlist cannot see.
+        if (parsed.username || parsed.password || parsed.hash) return null;
         if (!SMART_ROUTE_ORIGIN || parsed.origin !== SMART_ROUTE_ORIGIN) return null;
         if (typeof window !== 'undefined' && window.location && parsed.origin === window.location.origin) return null;
         if (!BRANCH_LONG_LINK_PATH.test(parsed.pathname)) return null;

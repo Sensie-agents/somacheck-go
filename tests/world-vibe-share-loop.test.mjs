@@ -31,8 +31,19 @@ assert.match(source, /route_url/, 'one-tap flow must read the public topic route
 assert.match(source, /window\.location\.assign\(topic\.smartRouteUrl\)/, 'one-tap flow must navigate the current tab to the validated smart route');
 assert.doesNotMatch(source, /window\.open\(|target="_blank"/, 'one-tap flow must not open a new tab or window');
 assert.doesNotMatch(source, /—/, 'portal copy must avoid em dashes');
+const topicRouteUrlSource = source.match(/function topicRouteUrl\(topic\) \{[\s\S]*?\n\s*\}\n/);
+assert.ok(topicRouteUrlSource, 'portal must define topicRouteUrl');
+assert.doesNotMatch(topicRouteUrlSource[0], /BRANCH_ROUTE_BASE/, 'the stable share route must never derive from the Branch smart-link origin');
+assert.match(topicRouteUrlSource[0], /absolute\(shareUrl\(topic\)\)/, 'the stable share route must fall back to the current page origin share path');
 
+// Topology: the Branch smart-link origin is configured on the page but is a different host
+// from the public web origin that serves the portal and the stable share route.
 const branchBase = 'https://link.somacheck.test';
+// The stable public share route lives on the web origin (go.somacheck.com in production,
+// the backend STATEMENT_LINK_BASE_URL), never on the Branch host. The real public topics
+// RPC returns no link_url, so the portal derives it from its own origin.
+const publicShareBase = 'https://go.somacheck.com';
+function stableShareRoute(origin, slug) { return `${origin}/world-vibe/share/${slug}`; }
 // App Store id6792978184 is the post-publication cutover target.
 const installUrl = 'https://testflight.apple.com/join/C4mAH3zz';
 const initialTime = '2026-08-26T13:00:00.000Z';
@@ -40,8 +51,8 @@ const firstRefreshTime = '2026-08-26T13:01:00.000Z';
 const unlockedTime = '2026-08-26T13:03:00.000Z';
 const expectedInitialTimestamp = `Last check-in ${new Date(initialTime).toLocaleString()}`;
 const expectedUnlockedTimestamp = `Last check-in ${new Date(unlockedTime).toLocaleString()}`;
-const expectedStableRoute = `${branchBase}/world-vibe/share/gut-vs-dashboard`;
-const expectedFallbackRoute = `${branchBase}/world-vibe/share/ai-at-work`;
+// A raw stable link_url already on the public web origin is kept without substitution.
+const expectedStableRoute = stableShareRoute(publicShareBase, 'gut-vs-dashboard');
 const expectedPersonalAppRoute = 'somacheck://s/personal-gut-token';
 const joinBodies = [];
 const joinRequests = [];
@@ -55,7 +66,7 @@ const publicTopicsPayload = {
       topic_slug: 'ai-at-work',
       prompt_id: 'prompt_ai_001',
       statement_text: 'I feel hopeful about AI at work',
-      link_url: `${branchBase}/world-vibe/share/ai-at-work`,
+      link_url: stableShareRoute(publicShareBase, 'ai-at-work'),
       contributor_count: 0,
       unlock_threshold: 5,
       remaining_count: 5,
@@ -83,7 +94,7 @@ const publicTopicsPayload = {
       topic_slug: 'present-leadership',
       prompt_id: 'prompt_present_001',
       statement_text: 'I am fully present with the people I lead',
-      link_url: `${branchBase}/world-vibe/share/present-leadership`,
+      link_url: stableShareRoute(publicShareBase, 'present-leadership'),
       contributor_count: 0,
       unlock_threshold: 5,
       remaining_count: 5,
@@ -315,7 +326,7 @@ async function runFixtureFallbackProof(browser) {
     await page.goto(`${origin}/world-vibe/?t=ai-at-work`, { waitUntil: 'networkidle' });
     await page.locator('#topic-ai-at-work').waitFor({ state: 'visible' });
     assert.equal(await page.locator('#topic-ai-at-work .statement').textContent(), 'I feel hopeful about AI at work', 'static fixture array must still normalize into portal statements');
-    assert.equal(await page.locator('#topic-ai-at-work [data-role="qr"]').getAttribute('data-payload'), expectedFallbackRoute, 'static fixture topics must derive the stable share route when no public link_url is provided');
+    assert.equal(await page.locator('#topic-ai-at-work [data-role="qr"]').getAttribute('data-payload'), stableShareRoute(origin, 'ai-at-work'), 'static fixture topics must derive the stable share route on the page origin when no public link_url is provided');
     return { fallbackNormalized: true };
   } finally {
     await page.close();
@@ -435,16 +446,17 @@ const lockedProgress = {
 
 // Mirrors buildWorldVibeBranchRoute in the backend lane: a cross-origin Branch long
 // link whose query holds exactly nine keys: route_version, topic_slug, prompt_id, the
-// stable share route as $canonical_url and $fallback_url, the configured install route
-// as $ios_url, and the three Branch privacy controls.
+// stable public share route (the web origin, never the Branch host) as $canonical_url
+// and $fallback_url, the configured install route as $ios_url, and the three Branch
+// privacy controls. The backend emits no userinfo and no fragment.
 // `mutate` lets a rejection variant break exactly one invariant of the canonical link.
-function smartRoute(slug, promptId, base, mutate) {
+function smartRoute(slug, promptId, stableRoute, base, mutate) {
   const url = new URL((base ?? branchBase) + smartRoutePath);
   url.searchParams.set('route_version', '1');
   url.searchParams.set('topic_slug', slug);
   if (promptId !== null) url.searchParams.set('prompt_id', promptId);
-  url.searchParams.set('$canonical_url', `${branchBase}/world-vibe/share/${slug}`);
-  url.searchParams.set('$fallback_url', `${branchBase}/world-vibe/share/${slug}`);
+  url.searchParams.set('$canonical_url', stableRoute);
+  url.searchParams.set('$fallback_url', stableRoute);
   url.searchParams.set('$ios_url', installUrl);
   url.searchParams.set('$ios_nativelink', 'true');
   url.searchParams.set('$deeplink_no_attribution', 'true');
@@ -453,11 +465,15 @@ function smartRoute(slug, promptId, base, mutate) {
   return url.toString();
 }
 
-function brokenSmartRoute(slug, mutate) {
-  return smartRoute(slug, `prompt_${slug}`, undefined, mutate);
+function brokenSmartRoute(slug, origin, mutate) {
+  return smartRoute(slug, `prompt_${slug}`, stableShareRoute(origin, slug), undefined, mutate);
 }
 
-const expectedSmartRoute = smartRoute('gut-vs-dashboard', 'prompt_gut_001');
+// The realistic production shape: the Branch host carries the route, and its canonical
+// and fallback targets are the exact share path on the origin serving this page.
+function expectedSmartRoute(origin) {
+  return smartRoute('gut-vs-dashboard', 'prompt_gut_001', stableShareRoute(origin, 'gut-vs-dashboard'));
+}
 
 function topicRow(slug, promptId, extra) {
   return Object.assign({
@@ -506,14 +522,15 @@ async function runSmartRouteProof(browser) {
   progressHits.clear();
   const joinStart = joinRequests.length;
   const requestStart = requestLog.length;
+  // Realistic public topics shape: no link_url on any row (the public RPC returns none),
+  // route_url on the Branch host with canonical and fallback on the page origin.
   const server = await startPortalServer({
-    topicsBody: {
+    topicsBody: (pageOrigin) => ({
       topics: [
-        topicRow('ai-at-work', 'prompt_ai_001', { statement_text: 'I feel hopeful about AI at work', route_url: smartRoute('ai-at-work', 'prompt_ai_001') }),
+        topicRow('ai-at-work', 'prompt_ai_001', { statement_text: 'I feel hopeful about AI at work', route_url: smartRoute('ai-at-work', 'prompt_ai_001', stableShareRoute(pageOrigin, 'ai-at-work')) }),
         topicRow('gut-vs-dashboard', 'prompt_gut_001', {
           statement_text: 'I trust my gut more than my dashboard',
-          link_url: expectedStableRoute,
-          route_url: expectedSmartRoute,
+          route_url: expectedSmartRoute(pageOrigin),
           contributor_count: 1,
           remaining_count: 4,
           aggregate_revision: 1,
@@ -521,10 +538,19 @@ async function runSmartRouteProof(browser) {
         }),
         topicRow('present-leadership', 'prompt_present_001', { statement_text: 'I am fully present with the people I lead' })
       ]
-    }
+    })
   });
   const origin = `http://127.0.0.1:${server.address().port}`;
   const portalUrl = `${origin}/world-vibe/?t=gut-vs-dashboard`;
+  const expectedStable = stableShareRoute(origin, 'gut-vs-dashboard');
+  const expectedSmart = expectedSmartRoute(origin);
+  const smartParams = new URL(expectedSmart).searchParams;
+  assert.notEqual(origin, branchBase, 'topology: the public share origin and the Branch origin must differ');
+  assert.equal(new URL(expectedSmart).origin, branchBase, 'topology: route_url must be on the Branch host');
+  assert.equal(new URL(expectedStable).origin, origin, 'topology: the stable share route must be on the page origin');
+  assert.equal(smartParams.get('$canonical_url'), expectedStable, 'topology: $canonical_url must be the exact current-origin share path');
+  assert.equal(smartParams.get('$fallback_url'), expectedStable, 'topology: $fallback_url must be the exact current-origin share path');
+  assert.equal(smartParams.get('$ios_url'), installUrl, 'topology: $ios_url must be the configured install route');
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
   const track = await trackPage(page);
   await interceptExternal(page);
@@ -542,16 +568,19 @@ async function runSmartRouteProof(browser) {
     assert.equal(await button.evaluate((node) => node.tagName), 'BUTTON', 'smart route must not pre-render a personal link on load');
     assert.equal(await button.textContent(), 'Start your check-in', 'smart route keeps the explicit CTA');
     assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="status"]').textContent(), '', 'smart route must not claim any personal status before the tap');
-    assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="qr"]').getAttribute('data-payload'), expectedStableRoute, 'QR must stay the stable topic route even when a smart route_url exists');
-    assert.equal(await page.locator('#topic-ai-at-work [data-role="qr"]').getAttribute('data-payload'), expectedFallbackRoute, 'a topic with only route_url must still derive the stable share route for its QR');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="qr"]').getAttribute('data-payload'), expectedStable, 'QR must be the current-origin stable topic route even when a smart route_url exists');
+    assert.equal(await page.locator('#topic-ai-at-work [data-role="qr"]').getAttribute('data-payload'), stableShareRoute(origin, 'ai-at-work'), 'a topic with only route_url must still derive the current-origin stable share route for its QR');
+    assert.equal(new URL(await page.locator('#topic-gut-vs-dashboard [data-role="qr"]').getAttribute('data-payload')).origin, origin, 'QR payload must never move to the Branch origin');
     assert.equal(await page.locator('#topic-ai-at-work .route-note').getAttribute('data-install-url'), installUrl, 'install fallback seam must be unchanged on the smart path');
     assert.match(await page.locator('#topic-gut-vs-dashboard .privacy-line').textContent(), /limited routing data may be used/i, 'privacy disclosure must remain on the smart path');
     assert.match(await page.locator('#topic-gut-vs-dashboard [data-role="aggregate"]').textContent(), /1 of 5/, 'locked aggregate must render on the smart path');
 
     await page.locator('#topic-gut-vs-dashboard .share-btn').click();
     const shared = await page.evaluate(() => window.__wvShared);
-    assert.equal(shared.url, expectedStableRoute, 'share must keep the stable topic route, never the smart or personal route');
+    assert.equal(shared.url, expectedStable, 'share must use the current-origin stable topic route, never the smart or personal route');
+    assert.equal(new URL(shared.url).origin, origin, 'navigator.share url must stay on the page origin, not the Branch origin');
     assert.doesNotMatch(shared.text, /key_test_public|prompt_id/, 'share text must not leak the Branch smart route');
+    assert.doesNotMatch(shared.text, new RegExp(branchBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'share text must not mention the Branch origin');
 
     // Passive activity: poll, scroll, refresh. None of it may join or navigate.
     await page.evaluate(() => window.__worldVibePoll());
@@ -580,14 +609,14 @@ async function runSmartRouteProof(browser) {
     const navigationsBeforeTap = track.navigations.length;
     const scriptNavigationsBeforeTap = track.scriptNavigations.length;
     await Promise.all([
-      page.waitForURL((url) => url.href === expectedSmartRoute, { timeout: 5000 }),
+      page.waitForURL((url) => url.href === expectedSmart, { timeout: 5000 }),
       page.locator('#topic-gut-vs-dashboard .answer-btn').click()
     ]);
     await page.waitForTimeout(350);
     const tapNavigations = track.navigations.slice(navigationsBeforeTap);
-    assert.deepEqual(tapNavigations, [expectedSmartRoute], 'first tap must perform exactly one navigation to the exact smart route_url');
-    assert.deepEqual(track.scriptNavigations.slice(scriptNavigationsBeforeTap), [`currentTab:${expectedSmartRoute}`], 'the tap must be exactly one script-initiated same-tab navigation');
-    assert.equal(page.url(), expectedSmartRoute, 'the tab itself must land on the smart route');
+    assert.deepEqual(tapNavigations, [expectedSmart], 'first tap must perform exactly one navigation to the exact smart route_url');
+    assert.deepEqual(track.scriptNavigations.slice(scriptNavigationsBeforeTap), [`currentTab:${expectedSmart}`], 'the tap must be exactly one script-initiated same-tab navigation');
+    assert.equal(page.url(), expectedSmart, 'the tab itself must land on the smart route');
     assert.equal(track.smartHostRequests.length, 1, 'exactly one request may reach the smart route host');
     assert.equal(track.smartHostRequests[0].method, 'GET', 'the smart route must be opened by a plain navigation');
     assert.equal(track.smartHostRequests[0].navigation, true, 'the smart route request must be the main-frame navigation');
@@ -598,8 +627,10 @@ async function runSmartRouteProof(browser) {
     assert.equal(landed.origin, branchBase, 'smart route must be on the configured Branch domain');
     assert.equal(landed.searchParams.get('topic_slug'), 'gut-vs-dashboard', 'smart route must carry the exact topic_slug');
     assert.equal(landed.searchParams.get('prompt_id'), 'prompt_gut_001', 'smart route must carry the exact prompt_id');
+    assert.equal(landed.searchParams.get('$canonical_url'), expectedStable, 'the landed route must carry the current-origin share path as $canonical_url');
+    assert.equal(landed.searchParams.get('$fallback_url'), expectedStable, 'the landed route must carry the current-origin share path as $fallback_url');
     assert.equal(await page.locator('body').getAttribute('data-landing'), 'smart-route', 'navigation must complete in the same tab');
-    return { navigations: tapNavigations, joinRequests: joinRequests.length - joinStart, smartHostRequests: track.smartHostRequests.length, sharedUrl: shared.url };
+    return { navigations: tapNavigations, joinRequests: joinRequests.length - joinStart, smartHostRequests: track.smartHostRequests.length, sharedUrl: shared.url, stableRoute: expectedStable, smartRoute: expectedSmart };
   } finally {
     await page.close();
     await closeServer(server);
@@ -634,43 +665,51 @@ async function runSmartRouteRejectionProof(browser) {
     ['wv-absent', {}],
     ['wv-malformed', { route_url: 'not a url' }],
     ['wv-custom-scheme', { route_url: 'somacheck://world-vibe?topic_slug=wv-custom-scheme&prompt_id=prompt_wv-custom-scheme' }],
-    ['wv-plain-http', { route_url: smartRoute('wv-plain-http', 'prompt_wv-plain-http', 'http://link.somacheck.test') }],
-    ['wv-same-origin', { route_url: smartRoute('wv-same-origin', 'prompt_wv-same-origin', origin) }],
-    ['wv-unconfigured-domain', { route_url: smartRoute('wv-unconfigured-domain', 'prompt_wv-unconfigured-domain', 'https://other.somacheck.test') }],
-    ['wv-wrong-topic', { route_url: smartRoute('gut-vs-dashboard', 'prompt_wv-wrong-topic') }],
-    ['wv-wrong-prompt', { route_url: smartRoute('wv-wrong-prompt', 'prompt_other_999') }],
-    ['wv-missing-prompt', { route_url: smartRoute('wv-missing-prompt', null) }],
+    ['wv-plain-http', { route_url: smartRoute('wv-plain-http', 'prompt_wv-plain-http', stableShareRoute(origin, 'wv-plain-http'), 'http://link.somacheck.test') }],
+    ['wv-same-origin', { route_url: smartRoute('wv-same-origin', 'prompt_wv-same-origin', stableShareRoute(origin, 'wv-same-origin'), origin) }],
+    ['wv-unconfigured-domain', { route_url: smartRoute('wv-unconfigured-domain', 'prompt_wv-unconfigured-domain', stableShareRoute(origin, 'wv-unconfigured-domain'), 'https://other.somacheck.test') }],
+    ['wv-wrong-topic', { route_url: smartRoute('gut-vs-dashboard', 'prompt_wv-wrong-topic', stableShareRoute(origin, 'wv-wrong-topic')) }],
+    ['wv-wrong-prompt', { route_url: smartRoute('wv-wrong-prompt', 'prompt_other_999', stableShareRoute(origin, 'wv-wrong-prompt')) }],
+    ['wv-missing-prompt', { route_url: smartRoute('wv-missing-prompt', null, stableShareRoute(origin, 'wv-missing-prompt')) }],
     ['wv-stable-share-as-route', { route_url: `${branchBase}/world-vibe/share/wv-stable-share-as-route` }],
-    ['wv-link-url-only', { link_url: smartRoute('wv-link-url-only', 'prompt_wv-link-url-only') }],
+    ['wv-link-url-only', { link_url: smartRoute('wv-link-url-only', 'prompt_wv-link-url-only', stableShareRoute(origin, 'wv-link-url-only')) }],
     // Each backend/frozen invariant independently: the control missing, and present but wrong.
-    ['wv-version-missing', { route_url: brokenSmartRoute('wv-version-missing', (url) => url.searchParams.delete('route_version')) }],
-    ['wv-version-wrong', { route_url: brokenSmartRoute('wv-version-wrong', (url) => url.searchParams.set('route_version', '2')) }],
-    ['wv-version-false', { route_url: brokenSmartRoute('wv-version-false', (url) => url.searchParams.set('route_version', 'false')) }],
-    ['wv-nativelink-missing', { route_url: brokenSmartRoute('wv-nativelink-missing', (url) => url.searchParams.delete('$ios_nativelink')) }],
-    ['wv-nativelink-false', { route_url: brokenSmartRoute('wv-nativelink-false', (url) => url.searchParams.set('$ios_nativelink', 'false')) }],
-    ['wv-no-attribution-missing', { route_url: brokenSmartRoute('wv-no-attribution-missing', (url) => url.searchParams.delete('$deeplink_no_attribution')) }],
-    ['wv-no-attribution-false', { route_url: brokenSmartRoute('wv-no-attribution-false', (url) => url.searchParams.set('$deeplink_no_attribution', 'false')) }],
-    ['wv-do-not-process-missing', { route_url: brokenSmartRoute('wv-do-not-process-missing', (url) => url.searchParams.delete('$do_not_process')) }],
-    ['wv-do-not-process-false', { route_url: brokenSmartRoute('wv-do-not-process-false', (url) => url.searchParams.set('$do_not_process', 'false')) }],
-    ['wv-control-duplicated', { route_url: brokenSmartRoute('wv-control-duplicated', (url) => url.searchParams.append('$do_not_process', 'false')) }],
+    ['wv-version-missing', { route_url: brokenSmartRoute('wv-version-missing', origin, (url) => url.searchParams.delete('route_version')) }],
+    ['wv-version-wrong', { route_url: brokenSmartRoute('wv-version-wrong', origin, (url) => url.searchParams.set('route_version', '2')) }],
+    ['wv-version-false', { route_url: brokenSmartRoute('wv-version-false', origin, (url) => url.searchParams.set('route_version', 'false')) }],
+    ['wv-nativelink-missing', { route_url: brokenSmartRoute('wv-nativelink-missing', origin, (url) => url.searchParams.delete('$ios_nativelink')) }],
+    ['wv-nativelink-false', { route_url: brokenSmartRoute('wv-nativelink-false', origin, (url) => url.searchParams.set('$ios_nativelink', 'false')) }],
+    ['wv-no-attribution-missing', { route_url: brokenSmartRoute('wv-no-attribution-missing', origin, (url) => url.searchParams.delete('$deeplink_no_attribution')) }],
+    ['wv-no-attribution-false', { route_url: brokenSmartRoute('wv-no-attribution-false', origin, (url) => url.searchParams.set('$deeplink_no_attribution', 'false')) }],
+    ['wv-do-not-process-missing', { route_url: brokenSmartRoute('wv-do-not-process-missing', origin, (url) => url.searchParams.delete('$do_not_process')) }],
+    ['wv-do-not-process-false', { route_url: brokenSmartRoute('wv-do-not-process-false', origin, (url) => url.searchParams.set('$do_not_process', 'false')) }],
+    ['wv-control-duplicated', { route_url: brokenSmartRoute('wv-control-duplicated', origin, (url) => url.searchParams.append('$do_not_process', 'false')) }],
     // Backend builder targets: canonical, fallback, and install routes must be exact.
-    ['wv-canonical-missing', { route_url: brokenSmartRoute('wv-canonical-missing', (url) => url.searchParams.delete('$canonical_url')) }],
-    ['wv-canonical-wrong', { route_url: brokenSmartRoute('wv-canonical-wrong', (url) => url.searchParams.set('$canonical_url', 'https://tracker.somacheck.test/world-vibe/share/wv-canonical-wrong')) }],
-    ['wv-fallback-missing', { route_url: brokenSmartRoute('wv-fallback-missing', (url) => url.searchParams.delete('$fallback_url')) }],
-    ['wv-fallback-wrong', { route_url: brokenSmartRoute('wv-fallback-wrong', (url) => url.searchParams.set('$fallback_url', `${branchBase}/world-vibe/share/gut-vs-dashboard`)) }],
-    ['wv-ios-url-missing', { route_url: brokenSmartRoute('wv-ios-url-missing', (url) => url.searchParams.delete('$ios_url')) }],
-    ['wv-ios-url-wrong', { route_url: brokenSmartRoute('wv-ios-url-wrong', (url) => url.searchParams.set('$ios_url', 'https://apps.apple.com/app/id6792978184')) }],
+    ['wv-canonical-missing', { route_url: brokenSmartRoute('wv-canonical-missing', origin, (url) => url.searchParams.delete('$canonical_url')) }],
+    ['wv-canonical-wrong', { route_url: brokenSmartRoute('wv-canonical-wrong', origin, (url) => url.searchParams.set('$canonical_url', 'https://tracker.somacheck.test/world-vibe/share/wv-canonical-wrong')) }],
+    ['wv-fallback-missing', { route_url: brokenSmartRoute('wv-fallback-missing', origin, (url) => url.searchParams.delete('$fallback_url')) }],
+    ['wv-fallback-wrong', { route_url: brokenSmartRoute('wv-fallback-wrong', origin, (url) => url.searchParams.set('$fallback_url', stableShareRoute(origin, 'gut-vs-dashboard'))) }],
+    ['wv-ios-url-missing', { route_url: brokenSmartRoute('wv-ios-url-missing', origin, (url) => url.searchParams.delete('$ios_url')) }],
+    ['wv-ios-url-wrong', { route_url: brokenSmartRoute('wv-ios-url-wrong', origin, (url) => url.searchParams.set('$ios_url', 'https://apps.apple.com/app/id6792978184')) }],
+    // Topology mismatch: canonical and fallback on the Branch origin instead of the
+    // public share origin is a misbuilt route and must fall back to the web join.
+    ['wv-branch-origin-canonical', { route_url: smartRoute('wv-branch-origin-canonical', 'prompt_wv-branch-origin-canonical', `${branchBase}/world-vibe/share/wv-branch-origin-canonical`) }],
     // Allowlisted payload only: any extra key is a tracking or misconfigured route.
-    ['wv-extra-campaign', { route_url: brokenSmartRoute('wv-extra-campaign', (url) => url.searchParams.append('~campaign', 'world-vibe-launch')) }],
-    ['wv-extra-channel', { route_url: brokenSmartRoute('wv-extra-channel', (url) => url.searchParams.append('~channel', 'sms')) }],
-    ['wv-extra-customer-id', { route_url: brokenSmartRoute('wv-extra-customer-id', (url) => url.searchParams.append('customer_id', 'cust_12345')) }],
-    ['wv-extra-account-id', { route_url: brokenSmartRoute('wv-extra-account-id', (url) => url.searchParams.append('account_id', 'acct_12345')) }],
+    ['wv-extra-campaign', { route_url: brokenSmartRoute('wv-extra-campaign', origin, (url) => url.searchParams.append('~campaign', 'world-vibe-launch')) }],
+    ['wv-extra-channel', { route_url: brokenSmartRoute('wv-extra-channel', origin, (url) => url.searchParams.append('~channel', 'sms')) }],
+    ['wv-extra-customer-id', { route_url: brokenSmartRoute('wv-extra-customer-id', origin, (url) => url.searchParams.append('customer_id', 'cust_12345')) }],
+    ['wv-extra-account-id', { route_url: brokenSmartRoute('wv-extra-account-id', origin, (url) => url.searchParams.append('account_id', 'acct_12345')) }],
+    // Exact backend shape: the builder never emits userinfo or a fragment, and either can
+    // smuggle an identity or tracking token past a query-only allowlist.
+    ['wv-userinfo-username', { route_url: brokenSmartRoute('wv-userinfo-username', origin, (url) => { url.username = 'cust_12345'; }) }],
+    ['wv-userinfo-credentials', { route_url: brokenSmartRoute('wv-userinfo-credentials', origin, (url) => { url.username = 'cust_12345'; url.password = 'secret'; }) }],
+    ['wv-fragment-identity', { route_url: brokenSmartRoute('wv-fragment-identity', origin, (url) => { url.hash = '#customer_id=cust_12345'; }) }],
     // Long-link path shape: must be /a/<public key> with the backend BRANCH_KEY shape.
-    ['wv-non-a-path', { route_url: brokenSmartRoute('wv-non-a-path', (url) => { url.pathname = '/l/key_test_public'; }) }],
-    ['wv-missing-public-key', { route_url: brokenSmartRoute('wv-missing-public-key', (url) => { url.pathname = '/a/'; }) }],
-    ['wv-malformed-key', { route_url: brokenSmartRoute('wv-malformed-key', (url) => { url.pathname = '/a/not-a-branch-key'; }) }],
-    ['wv-non-public-key', { route_url: brokenSmartRoute('wv-non-public-key', (url) => { url.pathname = '/a/key_secret_abc123'; }) }],
-    ['wv-key-trailing-path', { route_url: brokenSmartRoute('wv-key-trailing-path', (url) => { url.pathname = '/a/key_test_public/extra'; }) }]
+    ['wv-non-a-path', { route_url: brokenSmartRoute('wv-non-a-path', origin, (url) => { url.pathname = '/l/key_test_public'; }) }],
+    ['wv-missing-public-key', { route_url: brokenSmartRoute('wv-missing-public-key', origin, (url) => { url.pathname = '/a/'; }) }],
+    ['wv-malformed-key', { route_url: brokenSmartRoute('wv-malformed-key', origin, (url) => { url.pathname = '/a/not-a-branch-key'; }) }],
+    ['wv-non-public-key', { route_url: brokenSmartRoute('wv-non-public-key', origin, (url) => { url.pathname = '/a/key_secret_abc123'; }) }],
+    ['wv-key-trailing-path', { route_url: brokenSmartRoute('wv-key-trailing-path', origin, (url) => { url.pathname = '/a/key_test_public/extra'; }) }]
   ]);
   const server = await startPortalServer({
     topicsBody: (origin) => ({ topics: variants(origin).map(([slug, extra]) => topicRow(slug, `prompt_${slug}`, extra)) }),
@@ -686,7 +725,7 @@ async function runSmartRouteRejectionProof(browser) {
     await page.goto(`${origin}/world-vibe/`, { waitUntil: 'networkidle' });
     for (const [slug, extra] of variants(origin)) {
       await page.locator(`#topic-${slug}`).waitFor({ state: 'visible' });
-      const expectedQr = extra.link_url || `${branchBase}/world-vibe/share/${slug}`;
+      const expectedQr = extra.link_url || stableShareRoute(origin, slug);
       assert.equal(await page.locator(`#topic-${slug} [data-role="qr"]`).getAttribute('data-payload'), expectedQr, `${slug}: QR must never become the rejected route_url`);
       await exerciseFallbackJoin(page, track, slug, `somacheck://s/personal-${slug}`);
       rejected.push(slug);
@@ -701,7 +740,7 @@ async function runSmartRouteRejectionProof(browser) {
   progressHits.clear();
   const unconfigured = await startPortalServer({
     branchRouteBase: '',
-    topicsBody: { topics: [topicRow('wv-web-unconfigured', 'prompt_wv-web-unconfigured', { route_url: smartRoute('wv-web-unconfigured', 'prompt_wv-web-unconfigured') })] },
+    topicsBody: (pageOrigin) => ({ topics: [topicRow('wv-web-unconfigured', 'prompt_wv-web-unconfigured', { route_url: smartRoute('wv-web-unconfigured', 'prompt_wv-web-unconfigured', stableShareRoute(pageOrigin, 'wv-web-unconfigured')) })] }),
     joinResponse: (slug) => ({ statement_id: `stmt_${slug}`, link_url: `https://go.somacheck.com/s/personal-${slug}`, app_url: `somacheck://s/personal-${slug}` })
   });
   const unconfiguredOrigin = `http://127.0.0.1:${unconfigured.address().port}`;
@@ -771,7 +810,7 @@ async function runFallbackStatusProof(browser) {
       assert.deepEqual(Object.keys(sentBody).sort(), ['client_nonce', 'prompt_id', 'session_nonce'], `${slug}: join body keeps exactly three keys`);
       assert.deepEqual(track.navigations.slice(navigationsBefore), [], `${slug}: no automatic navigation`);
       assert.deepEqual(track.scriptNavigations.slice(scriptBefore), [], `${slug}: no script-initiated navigation attempt`);
-      assert.equal(await page.locator(`#topic-${slug} [data-role="qr"]`).getAttribute('data-payload'), `${branchBase}/world-vibe/share/${slug}`, `${slug}: QR stays the stable topic route`);
+      assert.equal(await page.locator(`#topic-${slug} [data-role="qr"]`).getAttribute('data-payload'), stableShareRoute(origin, slug), `${slug}: QR stays the current-origin stable topic route`);
       const control = page.locator(`#topic-${slug} .answer-btn`);
       if (spec.link) {
         assert.equal(await control.evaluate((node) => node.tagName), 'A', `${slug}: created response must yield the manual personal link`);
@@ -812,9 +851,10 @@ async function runSmartMutationProof(browser) {
   const mutated = source.replace(oneTapBlock, '');
   assert.notEqual(mutated, source, 'mutation must remove the one-tap branch');
   const joinStart = joinRequests.length;
+  // Same realistic fixture the positive one-tap proof accepts: no link_url, Branch route_url.
   const server = await startPortalServer({
     source: mutated,
-    topicsBody: { topics: [topicRow('gut-vs-dashboard', 'prompt_gut_001', { link_url: expectedStableRoute, route_url: expectedSmartRoute })] }
+    topicsBody: (pageOrigin) => ({ topics: [topicRow('gut-vs-dashboard', 'prompt_gut_001', { route_url: expectedSmartRoute(pageOrigin) })] })
   });
   const origin = `http://127.0.0.1:${server.address().port}`;
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
@@ -830,7 +870,7 @@ async function runSmartMutationProof(browser) {
     await page.waitForTimeout(350);
     const joinDelta = joinRequests.length - joinStart;
     const tapNavigations = track.navigations.slice(navigationsBefore);
-    const failedAsExpected = joinDelta === 1 && tapNavigations.length === 0 && page.url() !== expectedSmartRoute;
+    const failedAsExpected = joinDelta === 1 && tapNavigations.length === 0 && page.url() !== expectedSmartRoute(origin);
     assert.equal(failedAsExpected, true, 'the two-tap implementation must fail the one-tap gate: it joins in the browser and never navigates to the smart route');
     return { failedAsExpected, joinDelta, navigations: tapNavigations };
   } finally {
@@ -956,12 +996,12 @@ try {
     exactJoinBody: joinBodies[0],
     secondJoinBody: joinBodies[1],
     stableRoute: expectedStableRoute,
-    fallbackRoute: expectedFallbackRoute,
+    derivedStableRoute: smartRouteProof.stableRoute,
     lastActualCompletion: expectedUnlockedTimestamp,
     fixtureFallback,
     challengeRequired,
     mutationProof,
-    smartRoute: expectedSmartRoute,
+    smartRoute: smartRouteProof.smartRoute,
     smartRouteProof,
     smartRouteRejections,
     fallbackStatuses,
