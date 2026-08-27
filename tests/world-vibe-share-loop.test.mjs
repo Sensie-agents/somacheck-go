@@ -27,6 +27,10 @@ assert.match(source, /sessionStorage/, 'session nonce must be scoped to sessionS
 assert.doesNotMatch(source, /localStorage|document\.cookie/, 'session nonce must not use persistent browser tracking storage');
 assert.match(source, /Share this World Vibe/, 'portal must expose the concise share CTA');
 assert.match(source, /setInterval\(function\(\) \{[\s\S]*POLL_MS\);/, 'portal must poll on a 5 to 10 second timer');
+assert.match(source, /route_url/, 'one-tap flow must read the public topic route_url');
+assert.match(source, /window\.location\.assign\(topic\.smartRouteUrl\)/, 'one-tap flow must navigate the current tab to the validated smart route');
+assert.doesNotMatch(source, /window\.open\(|target="_blank"/, 'one-tap flow must not open a new tab or window');
+assert.doesNotMatch(source, /—/, 'portal copy must avoid em dashes');
 
 const branchBase = 'https://link.somacheck.test';
 // App Store id6792978184 is the post-publication cutover target.
@@ -151,10 +155,10 @@ const progressSeries = {
   ]
 };
 
-function withInjectedConfig(html, origin) {
+function withInjectedConfig(html, origin, routeBase = branchBase) {
   const injected = [
     `<script>window.SOMACHECK_API_BASE = ${JSON.stringify(`${origin}/api`)};`,
-    `window.SOMACHECK_BRANCH_ROUTE_BASE = ${JSON.stringify(branchBase)};`,
+    `window.SOMACHECK_BRANCH_ROUTE_BASE = ${JSON.stringify(routeBase)};`,
     `window.SOMACHECK_INSTALL_URL = ${JSON.stringify(installUrl)};`,
     'window.__wvIntervals = [];',
     'const __wvNativeSetInterval = window.setInterval.bind(window);',
@@ -172,15 +176,18 @@ function withInjectedConfig(html, origin) {
 }
 
 function nextProgress(slug, seriesMap) {
-  const series = seriesMap[slug];
+  const series = seriesMap[slug] || [lockedProgress];
   const count = progressHits.get(slug) || 0;
   progressHits.set(slug, count + 1);
   return series[Math.min(count, series.length - 1)];
 }
 
 async function startPortalServer(options) {
+  const html = options.source ?? source;
+  const routeBase = options.branchRouteBase ?? branchBase;
   const topicsStatus = options.topicsStatus ?? 200;
   const topicsBody = options.topicsBody ?? publicTopicsPayload;
+  const joinHandler = options.joinHandler ?? null;
   const joinStatus = options.joinStatus ?? 200;
   const joinResponse = options.joinResponse ?? {
     statement_id: 'stmt_gut_001',
@@ -194,8 +201,9 @@ async function startPortalServer(options) {
     requestLog.push({ method: request.method, pathname: url.pathname });
 
     if (url.pathname === '/api/v1/public/world-vibe/topics') {
+      const payload = typeof topicsBody === 'function' ? topicsBody(`http://127.0.0.1:${server.address().port}`) : topicsBody;
       response.writeHead(topicsStatus, { 'content-type': 'application/json' });
-      response.end(JSON.stringify(topicsBody));
+      response.end(JSON.stringify(payload));
       return;
     }
 
@@ -218,6 +226,10 @@ async function startPortalServer(options) {
         joinRequests.push(url.pathname);
         joinTopics.push(topicSlug);
         joinBodies.push(JSON.parse(body));
+        if (joinHandler) {
+          joinHandler(topicSlug, request, response);
+          return;
+        }
         response.writeHead(joinStatus, { 'content-type': 'application/json' });
         if (typeof joinResponse === 'function') {
           response.end(JSON.stringify(joinResponse(topicSlug)));
@@ -236,7 +248,7 @@ async function startPortalServer(options) {
 
     if (url.pathname === '/world-vibe/' || url.pathname === '/world-vibe') {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      response.end(withInjectedConfig(source, `http://127.0.0.1:${server.address().port}`));
+      response.end(withInjectedConfig(html, `http://127.0.0.1:${server.address().port}`, routeBase));
       return;
     }
 
@@ -374,10 +386,12 @@ async function runChallengeRequiredProof(browser) {
   });
   const origin = `http://127.0.0.1:${challengeServer.address().port}`;
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+  const track = await trackPage(page);
 
   try {
     await page.goto(`${origin}/world-vibe/?t=gut-vs-dashboard`, { waitUntil: 'networkidle' });
     await page.locator('#topic-gut-vs-dashboard').waitFor({ state: 'visible' });
+    const navigationsBefore = track.navigations.length;
     await page.locator('#topic-gut-vs-dashboard .answer-btn').click();
     await page.waitForFunction(function() {
       var statusEl = document.querySelector('#topic-gut-vs-dashboard [data-role="status"]');
@@ -391,6 +405,8 @@ async function runChallengeRequiredProof(browser) {
     }).length;
     assert.equal(joinDelta, 1, 'challenge_required must trigger exactly one join attempt');
     assert.equal(requestDelta, 1, 'challenge_required must not be retried automatically');
+    assert.deepEqual(track.navigations.slice(navigationsBefore), [], 'challenge_required must not navigate anywhere');
+    assert.deepEqual(track.scriptNavigations, [], 'challenge_required must not start any script navigation');
     assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').evaluate(function(node) { return node.tagName; }), 'BUTTON', 'challenge_required must fail closed without issuing a statement link');
     assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').textContent(), 'Start your check-in', 'challenge_required must preserve the explicit join action');
     assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').isDisabled(), false, 'challenge_required should allow a later manual retry');
@@ -401,6 +417,388 @@ async function runChallengeRequiredProof(browser) {
   } finally {
     await page.close();
     await closeServer(challengeServer);
+  }
+}
+
+const smartRouteHost = 'link.somacheck.test';
+const smartRoutePath = '/a/key_test_public';
+const lockedProgress = {
+  contributor_count: 0,
+  unlock_threshold: 5,
+  remaining_count: 5,
+  unlocked: false,
+  aggregate_revision: 0,
+  last_completed_at: null,
+  aligned: null,
+  unaligned: null
+};
+
+// Mirrors buildWorldVibeBranchRoute in the backend lane: a cross-origin Branch long
+// link that carries only route_version, topic_slug, prompt_id, and Branch controls.
+function smartRoute(slug, promptId, base) {
+  const url = new URL((base ?? branchBase) + smartRoutePath);
+  url.searchParams.set('route_version', '1');
+  url.searchParams.set('topic_slug', slug);
+  if (promptId !== null) url.searchParams.set('prompt_id', promptId);
+  url.searchParams.set('$canonical_url', `${branchBase}/world-vibe/share/${slug}`);
+  url.searchParams.set('$fallback_url', `${branchBase}/world-vibe/share/${slug}`);
+  url.searchParams.set('$ios_url', installUrl);
+  url.searchParams.set('$ios_nativelink', 'true');
+  url.searchParams.set('$deeplink_no_attribution', 'true');
+  url.searchParams.set('$do_not_process', 'true');
+  return url.toString();
+}
+
+const expectedSmartRoute = smartRoute('gut-vs-dashboard', 'prompt_gut_001');
+
+function topicRow(slug, promptId, extra) {
+  return Object.assign({
+    topic_slug: slug,
+    prompt_id: promptId,
+    statement_text: `Statement for ${slug}`
+  }, lockedProgress, extra || {});
+}
+
+async function trackPage(page) {
+  const record = { navigations: [], scriptNavigations: [], smartHostRequests: [], externalRequests: [] };
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) record.navigations.push(request.url());
+    if (url.hostname === smartRouteHost) record.smartHostRequests.push({ method: request.method(), url: request.url(), navigation: request.isNavigationRequest() });
+    if (/^https?:$/.test(url.protocol) && url.hostname !== '127.0.0.1' && !/googleapis|gstatic/.test(url.hostname)) record.externalRequests.push(request.url());
+  });
+  // Second observer through CDP: fires for custom-scheme and blocked attempts too, and
+  // records the disposition so a same-tab claim is proven rather than assumed.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Page.enable');
+  const rootFrameId = (await cdp.send('Page.getFrameTree')).frameTree.frame.id;
+  cdp.on('Page.frameRequestedNavigation', (event) => {
+    if (event.frameId === rootFrameId && event.reason === 'scriptInitiated') record.scriptNavigations.push(`${event.disposition}:${event.url}`);
+  });
+  return record;
+}
+
+async function interceptExternal(page) {
+  await page.route((url) => url.hostname !== '127.0.0.1', (route) => {
+    const host = new URL(route.request().url()).hostname;
+    if (/googleapis|gstatic/.test(host)) return route.abort();
+    return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><body data-landing="smart-route">landed</body></html>' });
+  });
+}
+
+function joinCount(slug) {
+  return joinTopics.filter((topic) => topic === slug).length;
+}
+
+function joinRequestLogCount(start) {
+  return requestLog.slice(start).filter((entry) => entry.pathname.endsWith('/join')).length;
+}
+
+async function runSmartRouteProof(browser) {
+  progressHits.clear();
+  const joinStart = joinRequests.length;
+  const requestStart = requestLog.length;
+  const server = await startPortalServer({
+    topicsBody: {
+      topics: [
+        topicRow('ai-at-work', 'prompt_ai_001', { statement_text: 'I feel hopeful about AI at work', route_url: smartRoute('ai-at-work', 'prompt_ai_001') }),
+        topicRow('gut-vs-dashboard', 'prompt_gut_001', {
+          statement_text: 'I trust my gut more than my dashboard',
+          link_url: expectedStableRoute,
+          route_url: expectedSmartRoute,
+          contributor_count: 1,
+          remaining_count: 4,
+          aggregate_revision: 1,
+          last_completed_at: initialTime
+        }),
+        topicRow('present-leadership', 'prompt_present_001', { statement_text: 'I am fully present with the people I lead' })
+      ]
+    }
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const portalUrl = `${origin}/world-vibe/?t=gut-vs-dashboard`;
+  const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+  const track = await trackPage(page);
+  await interceptExternal(page);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      value: function(data) { window.__wvShared = data; return Promise.resolve(); }
+    });
+  });
+
+  try {
+    await page.goto(portalUrl, { waitUntil: 'networkidle' });
+    await page.locator('#topic-gut-vs-dashboard').waitFor({ state: 'visible' });
+    const button = page.locator('#topic-gut-vs-dashboard .answer-btn');
+    assert.equal(await button.evaluate((node) => node.tagName), 'BUTTON', 'smart route must not pre-render a personal link on load');
+    assert.equal(await button.textContent(), 'Start your check-in', 'smart route keeps the explicit CTA');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="status"]').textContent(), '', 'smart route must not claim any personal status before the tap');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="qr"]').getAttribute('data-payload'), expectedStableRoute, 'QR must stay the stable topic route even when a smart route_url exists');
+    assert.equal(await page.locator('#topic-ai-at-work [data-role="qr"]').getAttribute('data-payload'), expectedFallbackRoute, 'a topic with only route_url must still derive the stable share route for its QR');
+    assert.equal(await page.locator('#topic-ai-at-work .route-note').getAttribute('data-install-url'), installUrl, 'install fallback seam must be unchanged on the smart path');
+    assert.match(await page.locator('#topic-gut-vs-dashboard .privacy-line').textContent(), /limited routing data may be used/i, 'privacy disclosure must remain on the smart path');
+    assert.match(await page.locator('#topic-gut-vs-dashboard [data-role="aggregate"]').textContent(), /1 of 5/, 'locked aggregate must render on the smart path');
+
+    await page.locator('#topic-gut-vs-dashboard .share-btn').click();
+    const shared = await page.evaluate(() => window.__wvShared);
+    assert.equal(shared.url, expectedStableRoute, 'share must keep the stable topic route, never the smart or personal route');
+    assert.doesNotMatch(shared.text, /key_test_public|prompt_id/, 'share text must not leak the Branch smart route');
+
+    // Passive activity: poll, scroll, refresh. None of it may join or navigate.
+    await page.evaluate(() => window.__worldVibePoll());
+    await page.waitForFunction(() => document.querySelector('#topic-gut-vs-dashboard [data-role="aggregate"]').textContent.includes('3 of 5'));
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.mouse.wheel(0, 400);
+    await page.waitForTimeout(250);
+    const navigationsBeforeReload = track.navigations.length;
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.locator('#topic-gut-vs-dashboard').waitFor({ state: 'visible' });
+    await page.waitForTimeout(250);
+    assert.deepEqual(track.navigations.slice(navigationsBeforeReload), [portalUrl], 'refresh must be the only navigation during passive activity');
+    assert.equal(joinRequests.length - joinStart, 0, 'load, poll, scroll, and refresh must never issue a join');
+    assert.equal(joinRequestLogCount(requestStart), 0, 'no join request may reach the server passively');
+    assert.deepEqual(track.scriptNavigations, [], 'passive activity must not start any script navigation');
+    assert.deepEqual(track.smartHostRequests, [], 'passive activity must not touch the smart route host');
+    assert.deepEqual(track.externalRequests, [], 'passive activity must not contact any external host');
+    const storageBefore = await page.evaluate(() => ({
+      localStorageKeys: Object.keys(window.localStorage),
+      sessionKeys: Object.keys(window.sessionStorage),
+      cookie: document.cookie
+    }));
+    assert.deepEqual(storageBefore, { localStorageKeys: [], sessionKeys: [], cookie: '' }, 'smart path must not write any storage before the tap');
+
+    // The one tap: exactly one same-tab navigation to the exact smart route, zero joins.
+    const navigationsBeforeTap = track.navigations.length;
+    const scriptNavigationsBeforeTap = track.scriptNavigations.length;
+    await Promise.all([
+      page.waitForURL((url) => url.href === expectedSmartRoute, { timeout: 5000 }),
+      page.locator('#topic-gut-vs-dashboard .answer-btn').click()
+    ]);
+    await page.waitForTimeout(350);
+    const tapNavigations = track.navigations.slice(navigationsBeforeTap);
+    assert.deepEqual(tapNavigations, [expectedSmartRoute], 'first tap must perform exactly one navigation to the exact smart route_url');
+    assert.deepEqual(track.scriptNavigations.slice(scriptNavigationsBeforeTap), [`currentTab:${expectedSmartRoute}`], 'the tap must be exactly one script-initiated same-tab navigation');
+    assert.equal(page.url(), expectedSmartRoute, 'the tab itself must land on the smart route');
+    assert.equal(track.smartHostRequests.length, 1, 'exactly one request may reach the smart route host');
+    assert.equal(track.smartHostRequests[0].method, 'GET', 'the smart route must be opened by a plain navigation');
+    assert.equal(track.smartHostRequests[0].navigation, true, 'the smart route request must be the main-frame navigation');
+    assert.equal(joinRequests.length - joinStart, 0, 'the smart path must issue zero browser join requests');
+    assert.equal(joinRequestLogCount(requestStart), 0, 'no join request may reach the server on the smart path');
+    const landed = new URL(page.url());
+    assert.notEqual(landed.origin, origin, 'smart route must be cross-origin from the portal');
+    assert.equal(landed.origin, branchBase, 'smart route must be on the configured Branch domain');
+    assert.equal(landed.searchParams.get('topic_slug'), 'gut-vs-dashboard', 'smart route must carry the exact topic_slug');
+    assert.equal(landed.searchParams.get('prompt_id'), 'prompt_gut_001', 'smart route must carry the exact prompt_id');
+    assert.equal(await page.locator('body').getAttribute('data-landing'), 'smart-route', 'navigation must complete in the same tab');
+    return { navigations: tapNavigations, joinRequests: joinRequests.length - joinStart, smartHostRequests: track.smartHostRequests.length, sharedUrl: shared.url };
+  } finally {
+    await page.close();
+    await closeServer(server);
+  }
+}
+
+async function exerciseFallbackJoin(page, track, slug, expectedAppRoute) {
+  const joinStart = joinRequests.length;
+  const navigationsBefore = track.navigations.length;
+  const smartBefore = track.smartHostRequests.length;
+  const scriptBefore = track.scriptNavigations.length;
+  const bodyIndex = joinBodies.length;
+  await page.locator(`#topic-${slug} .answer-btn`).click();
+  await page.waitForFunction((id) => document.querySelector(`#topic-${id} .answer-btn`).tagName === 'A', slug);
+  await page.waitForTimeout(250);
+  assert.equal(joinRequests.length - joinStart, 1, `${slug}: fallback must issue exactly one join`);
+  assert.equal(joinCount(slug), 1, `${slug}: the join must target this topic`);
+  assert.deepEqual(Object.keys(joinBodies[bodyIndex]).sort(), ['client_nonce', 'prompt_id', 'session_nonce'], `${slug}: fallback join body must keep exactly three keys`);
+  assert.equal(joinBodies[bodyIndex].prompt_id, `prompt_${slug}`, `${slug}: fallback join must send the exact prompt_id`);
+  assert.deepEqual(track.navigations.slice(navigationsBefore), [], `${slug}: fallback join must not navigate automatically`);
+  assert.deepEqual(track.scriptNavigations.slice(scriptBefore), [], `${slug}: fallback join must not start a script navigation`);
+  assert.equal(track.smartHostRequests.length - smartBefore, 0, `${slug}: fallback must not touch the smart route host`);
+  const anchor = page.locator(`#topic-${slug} .answer-btn`);
+  assert.equal(await anchor.textContent(), 'Open your check-in', `${slug}: fallback must show the manual personal link`);
+  assert.equal(await anchor.getAttribute('href'), expectedAppRoute, `${slug}: manual link must be the returned personal route`);
+  assert.equal(await page.locator(`#topic-${slug} [data-role="status"]`).textContent(), 'Your check-in is ready in SomaCheck.', `${slug}: fallback status stays neutral`);
+}
+
+async function runSmartRouteRejectionProof(browser) {
+  progressHits.clear();
+  const variants = (origin) => ([
+    ['wv-absent', {}],
+    ['wv-malformed', { route_url: 'not a url' }],
+    ['wv-custom-scheme', { route_url: 'somacheck://world-vibe?topic_slug=wv-custom-scheme&prompt_id=prompt_wv-custom-scheme' }],
+    ['wv-plain-http', { route_url: smartRoute('wv-plain-http', 'prompt_wv-plain-http', 'http://link.somacheck.test') }],
+    ['wv-same-origin', { route_url: smartRoute('wv-same-origin', 'prompt_wv-same-origin', origin) }],
+    ['wv-unconfigured-domain', { route_url: smartRoute('wv-unconfigured-domain', 'prompt_wv-unconfigured-domain', 'https://other.somacheck.test') }],
+    ['wv-wrong-topic', { route_url: smartRoute('gut-vs-dashboard', 'prompt_wv-wrong-topic') }],
+    ['wv-wrong-prompt', { route_url: smartRoute('wv-wrong-prompt', 'prompt_other_999') }],
+    ['wv-missing-prompt', { route_url: smartRoute('wv-missing-prompt', null) }],
+    ['wv-stable-share-as-route', { route_url: `${branchBase}/world-vibe/share/wv-stable-share-as-route` }],
+    ['wv-link-url-only', { link_url: smartRoute('wv-link-url-only', 'prompt_wv-link-url-only') }]
+  ]);
+  const server = await startPortalServer({
+    topicsBody: (origin) => ({ topics: variants(origin).map(([slug, extra]) => topicRow(slug, `prompt_${slug}`, extra)) }),
+    joinResponse: (slug) => ({ statement_id: `stmt_${slug}`, link_url: `https://go.somacheck.com/s/personal-${slug}`, app_url: `somacheck://s/personal-${slug}` })
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+  const track = await trackPage(page);
+  await interceptExternal(page);
+  const rejected = [];
+
+  try {
+    await page.goto(`${origin}/world-vibe/`, { waitUntil: 'networkidle' });
+    for (const [slug, extra] of variants(origin)) {
+      await page.locator(`#topic-${slug}`).waitFor({ state: 'visible' });
+      const expectedQr = extra.link_url || `${branchBase}/world-vibe/share/${slug}`;
+      assert.equal(await page.locator(`#topic-${slug} [data-role="qr"]`).getAttribute('data-payload'), expectedQr, `${slug}: QR must never become the rejected route_url`);
+      await exerciseFallbackJoin(page, track, slug, `somacheck://s/personal-${slug}`);
+      rejected.push(slug);
+    }
+    assert.deepEqual(track.externalRequests, [], 'rejected smart routes must never contact an external host');
+  } finally {
+    await page.close();
+    await closeServer(server);
+  }
+
+  // A valid route_url on a page with no configured Branch domain must also fall back.
+  progressHits.clear();
+  const unconfigured = await startPortalServer({
+    branchRouteBase: '',
+    topicsBody: { topics: [topicRow('wv-web-unconfigured', 'prompt_wv-web-unconfigured', { route_url: smartRoute('wv-web-unconfigured', 'prompt_wv-web-unconfigured') })] },
+    joinResponse: (slug) => ({ statement_id: `stmt_${slug}`, link_url: `https://go.somacheck.com/s/personal-${slug}`, app_url: `somacheck://s/personal-${slug}` })
+  });
+  const unconfiguredOrigin = `http://127.0.0.1:${unconfigured.address().port}`;
+  const unconfiguredPage = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+  const unconfiguredTrack = await trackPage(unconfiguredPage);
+  await interceptExternal(unconfiguredPage);
+  try {
+    await unconfiguredPage.goto(`${unconfiguredOrigin}/world-vibe/`, { waitUntil: 'networkidle' });
+    await unconfiguredPage.locator('#topic-wv-web-unconfigured').waitFor({ state: 'visible' });
+    assert.equal(await unconfiguredPage.locator('#topic-wv-web-unconfigured [data-role="qr"]').getAttribute('data-payload'), `${unconfiguredOrigin}/world-vibe/share/wv-web-unconfigured`, 'unconfigured page must keep the same-origin stable share route for the QR');
+    await exerciseFallbackJoin(unconfiguredPage, unconfiguredTrack, 'wv-web-unconfigured', 'somacheck://s/personal-wv-web-unconfigured');
+    rejected.push('wv-web-unconfigured');
+  } finally {
+    await unconfiguredPage.close();
+    await closeServer(unconfigured);
+  }
+  return { rejected };
+}
+
+async function runFallbackStatusProof(browser) {
+  progressHits.clear();
+  const cases = {
+    'wv-created-201': { status: 201, body: { statement_id: 'stmt_201', link_url: 'https://go.somacheck.com/s/personal-201', app_url: 'somacheck://s/personal-201' }, expectStatus: 'Your check-in is ready in SomaCheck.', link: true },
+    'wv-challenge-200': { status: 200, body: { error: 'challenge_required' }, expectStatus: 'This check-in could not be opened right now. Please try again later.' },
+    'wv-rate-limit-429': { status: 429, body: { error: 'rate_limited' }, expectStatus: 'the world is busy today, come back tomorrow' },
+    'wv-retired-404': { status: 404, body: { error: 'not_found' }, expectStatus: 'This topic has been retired.' },
+    'wv-server-500': { status: 500, body: { error: 'internal' }, expectStatus: 'Something went wrong. Please try again.' },
+    'wv-malformed-200': { status: 200, raw: 'not-json{', expectStatus: 'Something went wrong. Please try again.' },
+    'wv-network-drop': { drop: true, expectStatus: 'Something went wrong. Please try again.' }
+  };
+  const server = await startPortalServer({
+    topicsBody: { topics: Object.keys(cases).map((slug) => topicRow(slug, `prompt_${slug}`)) },
+    joinHandler: (slug, request, response) => {
+      const spec = cases[slug];
+      response.writeHead(spec.status, { 'content-type': 'application/json' });
+      response.end(spec.raw !== undefined ? spec.raw : JSON.stringify(spec.body));
+    }
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const portalUrl = `${origin}/world-vibe/`;
+  const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+  const track = await trackPage(page);
+  await interceptExternal(page);
+  const droppedJoins = [];
+  await page.route((url) => url.pathname.endsWith('/wv-network-drop/join'), (route) => {
+    droppedJoins.push(route.request().postDataJSON());
+    route.abort('connectionfailed');
+  });
+  const outcomes = {};
+
+  try {
+    await page.goto(portalUrl, { waitUntil: 'networkidle' });
+    for (const [slug, spec] of Object.entries(cases)) {
+      await page.locator(`#topic-${slug}`).waitFor({ state: 'visible' });
+      const navigationsBefore = track.navigations.length;
+      const scriptBefore = track.scriptNavigations.length;
+      const bodyIndex = joinBodies.length;
+      await page.locator(`#topic-${slug} .answer-btn`).click();
+      await page.waitForFunction(([id, expected]) => {
+        const statusEl = document.querySelector(`#topic-${id} [data-role="status"]`);
+        return statusEl && statusEl.textContent === expected;
+      }, [slug, spec.expectStatus]);
+      await page.waitForTimeout(350);
+      const attempts = spec.drop ? droppedJoins.length : joinCount(slug);
+      const sentBody = spec.drop ? droppedJoins[0] : joinBodies[bodyIndex];
+      assert.equal(attempts, 1, `${slug}: exactly one join attempt, never an automatic retry`);
+      assert.deepEqual(Object.keys(sentBody).sort(), ['client_nonce', 'prompt_id', 'session_nonce'], `${slug}: join body keeps exactly three keys`);
+      assert.deepEqual(track.navigations.slice(navigationsBefore), [], `${slug}: no automatic navigation`);
+      assert.deepEqual(track.scriptNavigations.slice(scriptBefore), [], `${slug}: no script-initiated navigation attempt`);
+      assert.equal(await page.locator(`#topic-${slug} [data-role="qr"]`).getAttribute('data-payload'), `${branchBase}/world-vibe/share/${slug}`, `${slug}: QR stays the stable topic route`);
+      const control = page.locator(`#topic-${slug} .answer-btn`);
+      if (spec.link) {
+        assert.equal(await control.evaluate((node) => node.tagName), 'A', `${slug}: created response must yield the manual personal link`);
+        assert.equal(await control.getAttribute('href'), spec.body.app_url, `${slug}: manual link must carry the returned personal route`);
+      } else {
+        assert.equal(await control.evaluate((node) => node.tagName), 'BUTTON', `${slug}: failure must not fabricate a personal link`);
+        assert.equal(await control.textContent(), 'Start your check-in', `${slug}: failure keeps the explicit CTA`);
+        assert.equal(await control.isDisabled(), false, `${slug}: failure leaves a manual retry available`);
+      }
+      outcomes[slug] = { joins: attempts, navigations: track.navigations.length - navigationsBefore, status: spec.expectStatus };
+    }
+
+    // Blocked manual navigation: the custom-scheme tap cannot complete in this browser,
+    // and the visible personal link must survive it untouched.
+    const anchor = page.locator('#topic-wv-created-201 .answer-btn');
+    const joinsBeforeManualTap = joinRequests.length;
+    const navigationsBeforeManualTap = track.navigations.length;
+    await anchor.click();
+    await page.waitForTimeout(350);
+    assert.deepEqual(track.navigations.slice(navigationsBeforeManualTap), ['somacheck://s/personal-201'], 'the manual tap is the only navigation attempt');
+    assert.equal(page.url(), portalUrl, 'a blocked personal navigation must leave the portal in place');
+    assert.equal(await anchor.count(), 1, 'blocked navigation must retain the manual personal link');
+    assert.equal(await anchor.textContent(), 'Open your check-in', 'blocked navigation must keep the manual link label');
+    assert.equal(await anchor.getAttribute('href'), 'somacheck://s/personal-201', 'blocked navigation must keep the personal route');
+    assert.equal(joinRequests.length - joinsBeforeManualTap, 0, 'a blocked manual tap must not re-join');
+    assert.deepEqual(track.externalRequests, [], 'fallback paths must never contact an external host');
+    return { outcomes, blockedNavigationRetainsLink: true };
+  } finally {
+    await page.close();
+    await closeServer(server);
+  }
+}
+
+async function runSmartMutationProof(browser) {
+  progressHits.clear();
+  const oneTapBlock = /\n\s*if \(topic\.smartRouteUrl\) \{[\s\S]*?window\.location\.assign\(topic\.smartRouteUrl\);\s*return;\s*\}/;
+  assert.match(source, oneTapBlock, 'mutation proof needs the one-tap branch to exist in the source');
+  const mutated = source.replace(oneTapBlock, '');
+  assert.notEqual(mutated, source, 'mutation must remove the one-tap branch');
+  const joinStart = joinRequests.length;
+  const server = await startPortalServer({
+    source: mutated,
+    topicsBody: { topics: [topicRow('gut-vs-dashboard', 'prompt_gut_001', { link_url: expectedStableRoute, route_url: expectedSmartRoute })] }
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+  const track = await trackPage(page);
+  await interceptExternal(page);
+
+  try {
+    await page.goto(`${origin}/world-vibe/`, { waitUntil: 'networkidle' });
+    await page.locator('#topic-gut-vs-dashboard').waitFor({ state: 'visible' });
+    const navigationsBefore = track.navigations.length;
+    await page.locator('#topic-gut-vs-dashboard .answer-btn').click();
+    await page.waitForFunction(() => document.querySelector('#topic-gut-vs-dashboard .answer-btn').tagName === 'A');
+    await page.waitForTimeout(350);
+    const joinDelta = joinRequests.length - joinStart;
+    const tapNavigations = track.navigations.slice(navigationsBefore);
+    const failedAsExpected = joinDelta === 1 && tapNavigations.length === 0 && page.url() !== expectedSmartRoute;
+    assert.equal(failedAsExpected, true, 'the two-tap implementation must fail the one-tap gate: it joins in the browser and never navigates to the smart route');
+    return { failedAsExpected, joinDelta, navigations: tapNavigations };
+  } finally {
+    await page.close();
+    await closeServer(server);
   }
 }
 
@@ -511,6 +909,10 @@ try {
   const fixtureFallback = await runFixtureFallbackProof(browser);
   const challengeRequired = await runChallengeRequiredProof(browser);
   const mutationProof = await runMutationProof(browser);
+  const smartRouteProof = await runSmartRouteProof(browser);
+  const smartRouteRejections = await runSmartRouteRejectionProof(browser);
+  const fallbackStatuses = await runFallbackStatusProof(browser);
+  const smartMutationProof = await runSmartMutationProof(browser);
 
   console.log(JSON.stringify({
     passed: true,
@@ -521,7 +923,12 @@ try {
     lastActualCompletion: expectedUnlockedTimestamp,
     fixtureFallback,
     challengeRequired,
-    mutationProof
+    mutationProof,
+    smartRoute: expectedSmartRoute,
+    smartRouteProof,
+    smartRouteRejections,
+    fallbackStatuses,
+    smartMutationProof
   }, null, 2));
 
   await page.close();

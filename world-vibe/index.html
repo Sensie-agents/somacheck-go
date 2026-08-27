@@ -237,6 +237,12 @@
       // Until then, the working public fallback is TestFlight.
       var APP_INSTALL_URL = (typeof window !== 'undefined' && window.SOMACHECK_INSTALL_URL) || 'https://testflight.apple.com/join/C4mAH3zz';
       var BRANCH_ROUTE_BASE = (typeof window !== 'undefined' && window.SOMACHECK_BRANCH_ROUTE_BASE) || '';
+      var SMART_ROUTE_ORIGIN = '';
+      try {
+        if (BRANCH_ROUTE_BASE) SMART_ROUTE_ORIGIN = new URL(BRANCH_ROUTE_BASE).origin;
+      } catch (error) {
+        SMART_ROUTE_ORIGIN = '';
+      }
       var state = {
         topics: [],
         byId: {},
@@ -259,6 +265,25 @@
           return BRANCH_ROUTE_BASE.replace(/\/$/, '') + shareUrl(topic);
         }
         return absolute(shareUrl(topic));
+      }
+      // One-tap installed-app target. Only the public topic route_url qualifies, and only
+      // when it is an https route on the configured Branch domain, off this page's origin,
+      // and carries this exact topic_slug and prompt_id. Same-origin universal links stay
+      // in Safari, so link_url, custom schemes, and personal links never qualify.
+      function smartTopicRoute(raw, topicId, promptId) {
+        if (typeof raw !== 'string' || !raw || !topicId || !promptId) return null;
+        var parsed;
+        try {
+          parsed = new URL(raw);
+        } catch (error) {
+          return null;
+        }
+        if (parsed.protocol !== 'https:') return null;
+        if (!SMART_ROUTE_ORIGIN || parsed.origin !== SMART_ROUTE_ORIGIN) return null;
+        if (typeof window !== 'undefined' && window.location && parsed.origin === window.location.origin) return null;
+        if (parsed.searchParams.get('topic_slug') !== topicId) return null;
+        if (parsed.searchParams.get('prompt_id') !== promptId) return null;
+        return raw;
       }
       function shareText(topic) {
         return "World Vibe: '" + topic.statement + "'. Open it in SomaCheck: " + topicRouteUrl(topic);
@@ -325,7 +350,8 @@
           id: topicId,
           statement: raw.statement_text || raw.statement || '',
           tag: raw.tag || 'topic',
-          routeUrl: raw.link_url || raw.route_url || raw.branch_url || null,
+          routeUrl: raw.link_url || raw.branch_url || null,
+          smartRouteUrl: smartTopicRoute(raw.route_url, topicId, raw.prompt_id || null),
           shareOg: raw.og_image || shareOg({ id: topicId }),
           portalUrl: portalUrl({ id: topicId }),
           shareUrl: shareUrl({ id: topicId }),
@@ -505,6 +531,12 @@
       function onAnswerClick(btn, topics) {
         var topic = topics.find(function(t) { return t.id === btn.dataset.topicId; });
         if (!topic) return;
+        if (topic.smartRouteUrl) {
+          // Validated cross-origin smart route: one direct navigation and no browser join.
+          // The app performs the single personal join after Branch opens or restores the topic.
+          window.location.assign(topic.smartRouteUrl);
+          return;
+        }
         if (topic.joinAppUrl) {
           window.location.href = topic.joinAppUrl;
           return;
