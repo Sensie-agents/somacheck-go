@@ -4,87 +4,33 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>World Vibe: I trust my gut more than my dashboard</title>
-  <meta name="description" content="The world is testing: 'I trust my gut more than my dashboard'. Where do you land? Open it in SomaCheck and add your World Vibe check-in.">
+  <meta name="description" content="World Vibe: I trust my gut more than my dashboard. Open it in SomaCheck and notice where you land.">
   <meta property="og:title" content="World Vibe: I trust my gut more than my dashboard">
-  <meta property="og:description" content="The world is testing: 'I trust my gut more than my dashboard'. Where do you land? Open it in SomaCheck and add your World Vibe check-in.">
+  <meta property="og:description" content="Open this statement in SomaCheck and add your check-in to the World Vibe.">
   <meta property="og:image" content="https://go.somacheck.com/world-vibe/assets/og-gut-vs-dashboard.png">
   <meta property="og:url" content="https://go.somacheck.com/world-vibe/share/gut-vs-dashboard">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="World Vibe: I trust my gut more than my dashboard">
-  <meta name="twitter:description" content="The world is testing: 'I trust my gut more than my dashboard'. Where do you land? Open it in SomaCheck and add your World Vibe check-in.">
-  <meta name="twitter:image" content="https://go.somacheck.com/world-vibe/assets/og-gut-vs-dashboard.png">
   <link rel="canonical" href="https://go.somacheck.com/world-vibe/share/gut-vs-dashboard">
-  <style>
-    :root { --bg:#FBF6EE; --ink:#261D16; --muted:#405340; --emerald:#12A594; }
-    @media (prefers-color-scheme: dark) { :root { --bg:#0a0b0d; --ink:#e8ecef; --muted:#8a9499; } }
-    body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; display:flex; align-items:center; justify-content:center; min-height:100dvh; text-align:center; }
-    .card { max-width:520px; padding:40px 24px; }
-    a { color:var(--emerald); }
-    p { color:var(--muted); line-height:1.5; }
-    .spinner { display:inline-block; width:20px; height:20px; border:2px solid var(--emerald); border-top-color:transparent; border-radius:50%; animation:spin 1s linear infinite; margin-bottom:12px; }
-    @keyframes spin { to { transform:rotate(360deg); } }
-  </style>
+  <link rel="stylesheet" href="/world-vibe/share/topic.css">
 </head>
 <body>
-  <div class="card" id="card">
-    <div class="spinner"></div>
-    <p>Preparing your check-in...</p>
-  </div>
-  <script>
-    (function() {
-      var STATEMENT_API_URL = 'https://pbldcmniommltbdwuykk.supabase.co/functions/v1/statement-api';
-      var topic = "gut-vs-dashboard";
-      var shareUrl = 'https://go.somacheck.com/world-vibe/share/gut-vs-dashboard';
-      var card = document.getElementById('card');
-
-      function setError(message, sub) {
-        card.innerHTML = '<p><strong>' + escapeHtml(message) + '</strong></p>' + (sub ? '<p>' + escapeHtml(sub) + '</p>' : '');
-      }
-
-      function escapeHtml(str) {
-        return String(str).replace(/[&<>"']/g, function(c) {
-          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-        });
-      }
-
-      function redirectTo(url) {
-        var meta = document.createElement('meta');
-        meta.httpEquiv = 'refresh';
-        meta.content = '0; url=' + url;
-        document.head.appendChild(meta);
-        card.innerHTML = '<p>Redirecting to your check-in...</p><p><a href="' + escapeHtml(url) + '">Open World Vibe</a></p>';
-        window.location.href = url;
-      }
-
-      fetch(STATEMENT_API_URL + '/v0/public/topics/join', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: topic })
-      }).then(function(r) {
-        if (r.status === 404) {
-          setError('This topic has been retired.', 'Pick a live topic at ' + shareUrl.replace('/share/' + topic, ''));
-          return;
-        }
-        if (r.status === 429) {
-          setError('the world is busy today, come back tomorrow');
-          return;
-        }
-        if (!r.ok) {
-          setError('Something went wrong. Please try again.');
-          return;
-        }
-        return r.json().then(function(data) {
-          if (data && data.link_url) {
-            redirectTo(data.link_url);
-          } else {
-            setError('Something went wrong. Please try again.');
-          }
-        });
-      }).catch(function() {
-        setError('Something went wrong. Please try again.');
-      });
-    })();
-  </script>
+  <main class="card" data-world-vibe-topic="gut-vs-dashboard" data-statement="I trust my gut more than my dashboard">
+    <div class="brand">SomaCheck</div>
+    <h1>World Vibe</h1>
+    <div class="tag">Decisions</div>
+    <blockquote>I trust my gut more than my dashboard</blockquote>
+    <div class="progress" id="progress" aria-live="polite">Loading World Vibe progress...</div>
+    <img class="qr" src="/world-vibe/assets/qr-gut-vs-dashboard.png" alt="QR code for I trust my gut more than my dashboard">
+    <p class="qr-caption">Scan to open this topic from another screen.</p>
+    <div class="actions">
+      <a class="button button-primary" id="start-check-in" aria-disabled="true">Preparing your check-in...</a>
+      <button class="button button-secondary" id="share-topic" type="button">Share this World Vibe</button>
+    </div>
+    <p class="status" id="status" aria-live="polite"></p>
+    <p class="privacy">Your identity is not shown here. Results appear only in aggregate. Limited routing data may return you to this topic after installation.</p>
+    <p class="footer"><a href="/world-vibe/">Explore World Vibe</a> · <a href="/privacy">Privacy</a></p>
+  </main>
+  <script src="/world-vibe/share/topic.js" defer></script>
 </body>
 </html>
