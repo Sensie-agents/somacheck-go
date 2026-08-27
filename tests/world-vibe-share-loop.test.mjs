@@ -434,7 +434,9 @@ const lockedProgress = {
 };
 
 // Mirrors buildWorldVibeBranchRoute in the backend lane: a cross-origin Branch long
-// link that carries only route_version, topic_slug, prompt_id, and Branch controls.
+// link whose query holds exactly nine keys: route_version, topic_slug, prompt_id, the
+// stable share route as $canonical_url and $fallback_url, the configured install route
+// as $ios_url, and the three Branch privacy controls.
 // `mutate` lets a rejection variant break exactly one invariant of the canonical link.
 function smartRoute(slug, promptId, base, mutate) {
   const url = new URL((base ?? branchBase) + smartRoutePath);
@@ -651,6 +653,18 @@ async function runSmartRouteRejectionProof(browser) {
     ['wv-do-not-process-missing', { route_url: brokenSmartRoute('wv-do-not-process-missing', (url) => url.searchParams.delete('$do_not_process')) }],
     ['wv-do-not-process-false', { route_url: brokenSmartRoute('wv-do-not-process-false', (url) => url.searchParams.set('$do_not_process', 'false')) }],
     ['wv-control-duplicated', { route_url: brokenSmartRoute('wv-control-duplicated', (url) => url.searchParams.append('$do_not_process', 'false')) }],
+    // Backend builder targets: canonical, fallback, and install routes must be exact.
+    ['wv-canonical-missing', { route_url: brokenSmartRoute('wv-canonical-missing', (url) => url.searchParams.delete('$canonical_url')) }],
+    ['wv-canonical-wrong', { route_url: brokenSmartRoute('wv-canonical-wrong', (url) => url.searchParams.set('$canonical_url', 'https://tracker.somacheck.test/world-vibe/share/wv-canonical-wrong')) }],
+    ['wv-fallback-missing', { route_url: brokenSmartRoute('wv-fallback-missing', (url) => url.searchParams.delete('$fallback_url')) }],
+    ['wv-fallback-wrong', { route_url: brokenSmartRoute('wv-fallback-wrong', (url) => url.searchParams.set('$fallback_url', `${branchBase}/world-vibe/share/gut-vs-dashboard`)) }],
+    ['wv-ios-url-missing', { route_url: brokenSmartRoute('wv-ios-url-missing', (url) => url.searchParams.delete('$ios_url')) }],
+    ['wv-ios-url-wrong', { route_url: brokenSmartRoute('wv-ios-url-wrong', (url) => url.searchParams.set('$ios_url', 'https://apps.apple.com/app/id6792978184')) }],
+    // Allowlisted payload only: any extra key is a tracking or misconfigured route.
+    ['wv-extra-campaign', { route_url: brokenSmartRoute('wv-extra-campaign', (url) => url.searchParams.append('~campaign', 'world-vibe-launch')) }],
+    ['wv-extra-channel', { route_url: brokenSmartRoute('wv-extra-channel', (url) => url.searchParams.append('~channel', 'sms')) }],
+    ['wv-extra-customer-id', { route_url: brokenSmartRoute('wv-extra-customer-id', (url) => url.searchParams.append('customer_id', 'cust_12345')) }],
+    ['wv-extra-account-id', { route_url: brokenSmartRoute('wv-extra-account-id', (url) => url.searchParams.append('account_id', 'acct_12345')) }],
     // Long-link path shape: must be /a/<public key> with the backend BRANCH_KEY shape.
     ['wv-non-a-path', { route_url: brokenSmartRoute('wv-non-a-path', (url) => { url.pathname = '/l/key_test_public'; }) }],
     ['wv-missing-public-key', { route_url: brokenSmartRoute('wv-missing-public-key', (url) => { url.pathname = '/a/'; }) }],

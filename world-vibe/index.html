@@ -274,16 +274,23 @@
         var values = params.getAll(key);
         return values.length === 1 && values[0] === expected;
       }
+      // The nine query keys the backend buildWorldVibeBranchRoute emits, and nothing else:
+      // the allowlisted payload (route_version, topic_slug, prompt_id) plus the Branch
+      // routing controls. Any other key, including Branch ~campaign/~channel or a customer
+      // or account identifier, marks a tracking or misconfigured route.
+      var SMART_ROUTE_KEYS = ['route_version', 'topic_slug', 'prompt_id', '$canonical_url', '$fallback_url', '$ios_url', '$ios_nativelink', '$deeplink_no_attribution', '$do_not_process'];
       // One-tap installed-app target. Only the public topic route_url qualifies, and only
       // when it is the exact privacy-limited Branch long link the backend builds: https on
       // the configured Branch domain, off this page's origin, the /a/<public-key> path,
-      // route_version 1, this exact topic_slug and prompt_id, and the three required
-      // Branch controls ($ios_nativelink, $deeplink_no_attribution, $do_not_process) each
-      // literally true. Anything less falls back to the explicit web join. Same-origin
+      // and a query holding exactly the nine allowlisted keys once each: route_version 1,
+      // this exact topic_slug and prompt_id, $canonical_url and $fallback_url equal to this
+      // topic's stable share route, $ios_url equal to the configured install route, and the
+      // three Branch controls ($ios_nativelink, $deeplink_no_attribution, $do_not_process)
+      // each literally true. Anything less falls back to the explicit web join. Same-origin
       // universal links stay in Safari, so link_url, custom schemes, and personal links
       // never qualify.
-      function smartTopicRoute(raw, topicId, promptId) {
-        if (typeof raw !== 'string' || !raw || !topicId || !promptId) return null;
+      function smartTopicRoute(raw, topicId, promptId, stableRoute) {
+        if (typeof raw !== 'string' || !raw || !topicId || !promptId || !stableRoute) return null;
         var parsed;
         try {
           parsed = new URL(raw);
@@ -295,9 +302,19 @@
         if (typeof window !== 'undefined' && window.location && parsed.origin === window.location.origin) return null;
         if (!BRANCH_LONG_LINK_PATH.test(parsed.pathname)) return null;
         var params = parsed.searchParams;
+        var entries = 0;
+        var extraKey = false;
+        params.forEach(function(value, key) {
+          entries += 1;
+          if (SMART_ROUTE_KEYS.indexOf(key) === -1) extraKey = true;
+        });
+        if (extraKey || entries !== SMART_ROUTE_KEYS.length) return null;
         if (!exactParam(params, 'route_version', '1')) return null;
         if (!exactParam(params, 'topic_slug', topicId)) return null;
         if (!exactParam(params, 'prompt_id', promptId)) return null;
+        if (!exactParam(params, '$canonical_url', stableRoute)) return null;
+        if (!exactParam(params, '$fallback_url', stableRoute)) return null;
+        if (!exactParam(params, '$ios_url', APP_INSTALL_URL)) return null;
         if (!exactParam(params, '$ios_nativelink', 'true')) return null;
         if (!exactParam(params, '$deeplink_no_attribution', 'true')) return null;
         if (!exactParam(params, '$do_not_process', 'true')) return null;
@@ -369,7 +386,7 @@
           statement: raw.statement_text || raw.statement || '',
           tag: raw.tag || 'topic',
           routeUrl: raw.link_url || raw.branch_url || null,
-          smartRouteUrl: smartTopicRoute(raw.route_url, topicId, raw.prompt_id || null),
+          smartRouteUrl: null,
           shareOg: raw.og_image || shareOg({ id: topicId }),
           portalUrl: portalUrl({ id: topicId }),
           shareUrl: shareUrl({ id: topicId }),
@@ -382,6 +399,8 @@
           progress: normalizeProgress(raw.progress || raw.aggregate || raw)
         };
         topic.routeUrl = topicRouteUrl(topic);
+        // The stable share route is the only acceptable $canonical_url and $fallback_url.
+        topic.smartRouteUrl = smartTopicRoute(raw.route_url, topicId, topic.promptId, topic.routeUrl);
         return topic;
       }
       function renderTopics(topics) {
