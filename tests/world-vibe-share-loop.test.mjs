@@ -30,15 +30,17 @@ assert.match(source, /setInterval\(function\(\) \{[\s\S]*POLL_MS\);/, 'portal mu
 assert.match(source, /route_url/, 'one-tap flow must read the public topic route_url');
 assert.match(source, /window\.location\.assign\(topic\.smartRouteUrl\)/, 'one-tap flow must navigate the current tab to the validated smart route');
 assert.doesNotMatch(source, /window\.open\(|target="_blank"/, 'one-tap flow must not open a new tab or window');
+assert.match(source, /var SMART_ROUTE_ORIGIN = 'https:\/\/link\.somacheck\.com';/, 'production must pin the approved Branch smart-link origin');
+assert.doesNotMatch(source, /SOMACHECK_BRANCH_ROUTE_BASE/, 'production must not depend on runtime Branch-origin injection');
 assert.doesNotMatch(source, /—/, 'portal copy must avoid em dashes');
 const topicRouteUrlSource = source.match(/function topicRouteUrl\(topic\) \{[\s\S]*?\n\s*\}\n/);
 assert.ok(topicRouteUrlSource, 'portal must define topicRouteUrl');
 assert.doesNotMatch(topicRouteUrlSource[0], /BRANCH_ROUTE_BASE/, 'the stable share route must never derive from the Branch smart-link origin');
 assert.match(topicRouteUrlSource[0], /absolute\(shareUrl\(topic\)\)/, 'the stable share route must fall back to the current page origin share path');
 
-// Topology: the Branch smart-link origin is configured on the page but is a different host
+// Topology: the Branch smart-link origin is pinned on the page but is a different host
 // from the public web origin that serves the portal and the stable share route.
-const branchBase = 'https://link.somacheck.test';
+const branchBase = 'https://link.somacheck.com';
 // The stable public share route lives on the web origin (go.somacheck.com in production,
 // the backend STATEMENT_LINK_BASE_URL), never on the Branch host. The real public topics
 // RPC returns no link_url, so the portal derives it from its own origin.
@@ -166,10 +168,9 @@ const progressSeries = {
   ]
 };
 
-function withInjectedConfig(html, origin, routeBase = branchBase) {
+function withInjectedConfig(html, origin) {
   const injected = [
     `<script>window.SOMACHECK_API_BASE = ${JSON.stringify(`${origin}/api`)};`,
-    `window.SOMACHECK_BRANCH_ROUTE_BASE = ${JSON.stringify(routeBase)};`,
     `window.SOMACHECK_INSTALL_URL = ${JSON.stringify(installUrl)};`,
     'window.__wvIntervals = [];',
     'const __wvNativeSetInterval = window.setInterval.bind(window);',
@@ -195,7 +196,6 @@ function nextProgress(slug, seriesMap) {
 
 async function startPortalServer(options) {
   const html = options.source ?? source;
-  const routeBase = options.branchRouteBase ?? branchBase;
   const topicsStatus = options.topicsStatus ?? 200;
   const topicsBody = options.topicsBody ?? publicTopicsPayload;
   const joinHandler = options.joinHandler ?? null;
@@ -259,7 +259,7 @@ async function startPortalServer(options) {
 
     if (url.pathname === '/world-vibe/' || url.pathname === '/world-vibe') {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      response.end(withInjectedConfig(html, `http://127.0.0.1:${server.address().port}`, routeBase));
+      response.end(withInjectedConfig(html, `http://127.0.0.1:${server.address().port}`));
       return;
     }
 
@@ -431,7 +431,7 @@ async function runChallengeRequiredProof(browser) {
   }
 }
 
-const smartRouteHost = 'link.somacheck.test';
+const smartRouteHost = 'link.somacheck.com';
 const smartRoutePath = '/a/key_test_public';
 const lockedProgress = {
   contributor_count: 0,
@@ -736,27 +736,6 @@ async function runSmartRouteRejectionProof(browser) {
     await closeServer(server);
   }
 
-  // A valid route_url on a page with no configured Branch domain must also fall back.
-  progressHits.clear();
-  const unconfigured = await startPortalServer({
-    branchRouteBase: '',
-    topicsBody: (pageOrigin) => ({ topics: [topicRow('wv-web-unconfigured', 'prompt_wv-web-unconfigured', { route_url: smartRoute('wv-web-unconfigured', 'prompt_wv-web-unconfigured', stableShareRoute(pageOrigin, 'wv-web-unconfigured')) })] }),
-    joinResponse: (slug) => ({ statement_id: `stmt_${slug}`, link_url: `https://go.somacheck.com/s/personal-${slug}`, app_url: `somacheck://s/personal-${slug}` })
-  });
-  const unconfiguredOrigin = `http://127.0.0.1:${unconfigured.address().port}`;
-  const unconfiguredPage = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
-  const unconfiguredTrack = await trackPage(unconfiguredPage);
-  await interceptExternal(unconfiguredPage);
-  try {
-    await unconfiguredPage.goto(`${unconfiguredOrigin}/world-vibe/`, { waitUntil: 'networkidle' });
-    await unconfiguredPage.locator('#topic-wv-web-unconfigured').waitFor({ state: 'visible' });
-    assert.equal(await unconfiguredPage.locator('#topic-wv-web-unconfigured [data-role="qr"]').getAttribute('data-payload'), `${unconfiguredOrigin}/world-vibe/share/wv-web-unconfigured`, 'unconfigured page must keep the same-origin stable share route for the QR');
-    await exerciseFallbackJoin(unconfiguredPage, unconfiguredTrack, 'wv-web-unconfigured', 'somacheck://s/personal-wv-web-unconfigured');
-    rejected.push('wv-web-unconfigured');
-  } finally {
-    await unconfiguredPage.close();
-    await closeServer(unconfigured);
-  }
   return { rejected };
 }
 

@@ -236,15 +236,9 @@
       // Runtime seam can cut over to the App Store after publication.
       // Until then, the working public fallback is TestFlight.
       var APP_INSTALL_URL = (typeof window !== 'undefined' && window.SOMACHECK_INSTALL_URL) || 'https://testflight.apple.com/join/C4mAH3zz';
-      // The configured cross-origin Branch smart-link origin. It only decides which
-      // route_url origin may qualify for one-tap; it never rewrites the stable share route.
-      var BRANCH_ROUTE_BASE = (typeof window !== 'undefined' && window.SOMACHECK_BRANCH_ROUTE_BASE) || '';
-      var SMART_ROUTE_ORIGIN = '';
-      try {
-        if (BRANCH_ROUTE_BASE) SMART_ROUTE_ORIGIN = new URL(BRANCH_ROUTE_BASE).origin;
-      } catch (error) {
-        SMART_ROUTE_ORIGIN = '';
-      }
+      // The immutable, cross-origin Branch host used only for validated one-tap routes.
+      // Stable share and QR routes remain on this page's public go.somacheck.com origin.
+      var SMART_ROUTE_ORIGIN = 'https://link.somacheck.com';
       var state = {
         topics: [],
         byId: {},
