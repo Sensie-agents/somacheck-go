@@ -270,7 +270,7 @@
       <blockquote>
         <p class="statement" id="statement-text">Loading statement…</p>
       </blockquote>
-      <p class="hint" id="statement-hint">Open SomaCheck and answer with the 3-second wrist check. Your answer is anonymous. See what you notice.</p>
+      <p class="hint" id="statement-hint">Open SomaCheck and answer with the 3-second wrist check. Your check-in saves to your account. Any public World Vibe results appear only in aggregate.</p>
       <div class="qr-block" id="qr-block">
         <div class="qr-code" id="statement-qr" role="img" aria-label="QR code for this shared check-in"></div>
         <p class="qr-caption">Scan from another screen with your iPhone camera. If SomaCheck is installed, this opens the statement.</p>
@@ -307,7 +307,8 @@
     (function() {
       // Config: set window.SOMACHECK_API_BASE to override (e.g. local mock).
       var API_BASE = (typeof window !== 'undefined' && window.SOMACHECK_API_BASE) || 'https://pbldcmniommltbdwuykk.supabase.co/functions/v1/statement-api';
-      // App Store listing is not live yet; public TestFlight beta is the honest install path.
+      // Runtime cutover target after public launch: App Store id6792978184.
+      // Current working public fallback remains TestFlight.
       var INSTALL_URL = 'https://testflight.apple.com/join/C4mAH3zz';
       var POLL_INTERVAL_MS = 3000;
 

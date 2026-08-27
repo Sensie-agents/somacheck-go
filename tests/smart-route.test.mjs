@@ -17,6 +17,7 @@ const token = 'wvsmart-functional-gate';
 const statement = 'I trust my gut more than my dashboard';
 const expectedUniversalLink = `https://go.somacheck.com/s/${token}`;
 const expectedAppLink = `somacheck://s/${token}`;
+// App Store id6792978184 remains the post-publication cutover target.
 const expectedInstallLink = 'https://testflight.apple.com/join/C4mAH3zz';
 
 const [fallback, source, qrLibrary] = await Promise.all([
@@ -29,7 +30,7 @@ assert.equal(fallback, source, '404.html must stay identical to s/index.html bec
 assert.match(qrLibrary, /QRCode=function/, 'the local QR renderer must be present');
 assert.doesNotMatch(source, /(?:data\.deeplink|data\.app_store_url|\?pt=|somacheck_deferred_token)/, 'stale or misleading routing fields must not return');
 assert.doesNotMatch(source, /your body knows|—/i, 'all fallback and social-preview copy must preserve human authority and avoid em dashes');
-assert.match(source, /return to this link to open this statement\./, 'no-app flow must state the honest post-TestFlight return step');
+assert.match(source, /return to this link to open this statement\./, 'no-app flow must state the honest post-install return step');
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url, 'http://127.0.0.1');
@@ -83,7 +84,7 @@ try {
   await assert.doesNotReject(() => page.locator('#statement-text').waitFor({ state: 'visible' }));
   assert.equal(await page.locator('#statement-text').textContent(), statement, 'resolved statement must be shown exactly');
   assert.equal(await page.locator('#open-app').getAttribute('href'), expectedAppLink, 'button must use the installed-app custom scheme');
-  assert.equal(await page.locator('#app-store').getAttribute('href'), expectedInstallLink, 'install button must use the real public TestFlight URL');
+  assert.equal(await page.locator('#app-store').getAttribute('href'), expectedInstallLink, 'install button must use the current working public TestFlight URL');
   assert.equal(await page.locator('#statement-qr').getAttribute('data-payload'), expectedUniversalLink, 'QR payload must be the first-party universal link');
   assert.equal(await page.locator('#statement-qr').getAttribute('title'), expectedUniversalLink, 'rendered QR must encode the same universal link');
 
@@ -93,7 +94,7 @@ try {
   assert.equal(await qr.locator('canvas').count(), 1, 'QR renderer must draw a real canvas');
   await qr.screenshot({ path: path.join(process.env.WVSMART_ARTIFACT_DIR || '/tmp', 'wvsmart-qr.png') });
 
-  assert.match(await page.locator('#statement-hint').textContent(), /anonymous\. See what you notice\./, 'copy must preserve anonymity and human authority');
+  assert.match(await page.locator('#statement-hint').textContent(), /check-in saves to your account\. Any public World Vibe results appear only in aggregate\./i, 'fallback copy must stay truthful about account linkage and aggregate-only public results');
   assert.match(await page.locator('.install-note').textContent(), /install it through TestFlight, then return to this link/i, 'no-app limitation must be visible');
   assert.equal(await page.locator('#status-badge').textContent(), 'Shared check-in', 'page must reach its loaded state');
 
