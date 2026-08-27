@@ -266,10 +266,22 @@
         }
         return absolute(shareUrl(topic));
       }
+      // Branch long-link path: /a/<public key>, where the key matches the backend
+      // BRANCH_KEY shape (key_live_... or key_test_...). Nothing else is a long link.
+      var BRANCH_LONG_LINK_PATH = /^\/a\/key_(?:live|test)_[A-Za-z0-9]+$/;
+      // A query control counts only when it appears exactly once with the exact value.
+      function exactParam(params, key, expected) {
+        var values = params.getAll(key);
+        return values.length === 1 && values[0] === expected;
+      }
       // One-tap installed-app target. Only the public topic route_url qualifies, and only
-      // when it is an https route on the configured Branch domain, off this page's origin,
-      // and carries this exact topic_slug and prompt_id. Same-origin universal links stay
-      // in Safari, so link_url, custom schemes, and personal links never qualify.
+      // when it is the exact privacy-limited Branch long link the backend builds: https on
+      // the configured Branch domain, off this page's origin, the /a/<public-key> path,
+      // route_version 1, this exact topic_slug and prompt_id, and the three required
+      // Branch controls ($ios_nativelink, $deeplink_no_attribution, $do_not_process) each
+      // literally true. Anything less falls back to the explicit web join. Same-origin
+      // universal links stay in Safari, so link_url, custom schemes, and personal links
+      // never qualify.
       function smartTopicRoute(raw, topicId, promptId) {
         if (typeof raw !== 'string' || !raw || !topicId || !promptId) return null;
         var parsed;
@@ -281,8 +293,14 @@
         if (parsed.protocol !== 'https:') return null;
         if (!SMART_ROUTE_ORIGIN || parsed.origin !== SMART_ROUTE_ORIGIN) return null;
         if (typeof window !== 'undefined' && window.location && parsed.origin === window.location.origin) return null;
-        if (parsed.searchParams.get('topic_slug') !== topicId) return null;
-        if (parsed.searchParams.get('prompt_id') !== promptId) return null;
+        if (!BRANCH_LONG_LINK_PATH.test(parsed.pathname)) return null;
+        var params = parsed.searchParams;
+        if (!exactParam(params, 'route_version', '1')) return null;
+        if (!exactParam(params, 'topic_slug', topicId)) return null;
+        if (!exactParam(params, 'prompt_id', promptId)) return null;
+        if (!exactParam(params, '$ios_nativelink', 'true')) return null;
+        if (!exactParam(params, '$deeplink_no_attribution', 'true')) return null;
+        if (!exactParam(params, '$do_not_process', 'true')) return null;
         return raw;
       }
       function shareText(topic) {

@@ -435,7 +435,8 @@ const lockedProgress = {
 
 // Mirrors buildWorldVibeBranchRoute in the backend lane: a cross-origin Branch long
 // link that carries only route_version, topic_slug, prompt_id, and Branch controls.
-function smartRoute(slug, promptId, base) {
+// `mutate` lets a rejection variant break exactly one invariant of the canonical link.
+function smartRoute(slug, promptId, base, mutate) {
   const url = new URL((base ?? branchBase) + smartRoutePath);
   url.searchParams.set('route_version', '1');
   url.searchParams.set('topic_slug', slug);
@@ -446,7 +447,12 @@ function smartRoute(slug, promptId, base) {
   url.searchParams.set('$ios_nativelink', 'true');
   url.searchParams.set('$deeplink_no_attribution', 'true');
   url.searchParams.set('$do_not_process', 'true');
+  if (mutate) mutate(url);
   return url.toString();
+}
+
+function brokenSmartRoute(slug, mutate) {
+  return smartRoute(slug, `prompt_${slug}`, undefined, mutate);
 }
 
 const expectedSmartRoute = smartRoute('gut-vs-dashboard', 'prompt_gut_001');
@@ -633,7 +639,24 @@ async function runSmartRouteRejectionProof(browser) {
     ['wv-wrong-prompt', { route_url: smartRoute('wv-wrong-prompt', 'prompt_other_999') }],
     ['wv-missing-prompt', { route_url: smartRoute('wv-missing-prompt', null) }],
     ['wv-stable-share-as-route', { route_url: `${branchBase}/world-vibe/share/wv-stable-share-as-route` }],
-    ['wv-link-url-only', { link_url: smartRoute('wv-link-url-only', 'prompt_wv-link-url-only') }]
+    ['wv-link-url-only', { link_url: smartRoute('wv-link-url-only', 'prompt_wv-link-url-only') }],
+    // Each backend/frozen invariant independently: the control missing, and present but wrong.
+    ['wv-version-missing', { route_url: brokenSmartRoute('wv-version-missing', (url) => url.searchParams.delete('route_version')) }],
+    ['wv-version-wrong', { route_url: brokenSmartRoute('wv-version-wrong', (url) => url.searchParams.set('route_version', '2')) }],
+    ['wv-version-false', { route_url: brokenSmartRoute('wv-version-false', (url) => url.searchParams.set('route_version', 'false')) }],
+    ['wv-nativelink-missing', { route_url: brokenSmartRoute('wv-nativelink-missing', (url) => url.searchParams.delete('$ios_nativelink')) }],
+    ['wv-nativelink-false', { route_url: brokenSmartRoute('wv-nativelink-false', (url) => url.searchParams.set('$ios_nativelink', 'false')) }],
+    ['wv-no-attribution-missing', { route_url: brokenSmartRoute('wv-no-attribution-missing', (url) => url.searchParams.delete('$deeplink_no_attribution')) }],
+    ['wv-no-attribution-false', { route_url: brokenSmartRoute('wv-no-attribution-false', (url) => url.searchParams.set('$deeplink_no_attribution', 'false')) }],
+    ['wv-do-not-process-missing', { route_url: brokenSmartRoute('wv-do-not-process-missing', (url) => url.searchParams.delete('$do_not_process')) }],
+    ['wv-do-not-process-false', { route_url: brokenSmartRoute('wv-do-not-process-false', (url) => url.searchParams.set('$do_not_process', 'false')) }],
+    ['wv-control-duplicated', { route_url: brokenSmartRoute('wv-control-duplicated', (url) => url.searchParams.append('$do_not_process', 'false')) }],
+    // Long-link path shape: must be /a/<public key> with the backend BRANCH_KEY shape.
+    ['wv-non-a-path', { route_url: brokenSmartRoute('wv-non-a-path', (url) => { url.pathname = '/l/key_test_public'; }) }],
+    ['wv-missing-public-key', { route_url: brokenSmartRoute('wv-missing-public-key', (url) => { url.pathname = '/a/'; }) }],
+    ['wv-malformed-key', { route_url: brokenSmartRoute('wv-malformed-key', (url) => { url.pathname = '/a/not-a-branch-key'; }) }],
+    ['wv-non-public-key', { route_url: brokenSmartRoute('wv-non-public-key', (url) => { url.pathname = '/a/key_secret_abc123'; }) }],
+    ['wv-key-trailing-path', { route_url: brokenSmartRoute('wv-key-trailing-path', (url) => { url.pathname = '/a/key_test_public/extra'; }) }]
   ]);
   const server = await startPortalServer({
     topicsBody: (origin) => ({ topics: variants(origin).map(([slug, extra]) => topicRow(slug, `prompt_${slug}`, extra)) }),
