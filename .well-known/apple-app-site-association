@@ -13,6 +13,10 @@
           {
             "/": "/s/*",
             "comment": "Shared statement link: opens SomaCheck app on the statement screen if installed, web fallback otherwise."
+          },
+          {
+            "/": "/world-vibe/share/*",
+            "comment": "World Vibe topic share: opens SomaCheck on the selected topic if installed, public topic page otherwise."
           }
         ]
       }
