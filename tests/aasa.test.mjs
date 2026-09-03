@@ -9,7 +9,8 @@ const expectedAppID = 'G4KXPE7MY4.com.sensie.somacheck';
 const expectedPaths = [
   '/auth/callback*',
   '/s/*',
-  '/world-vibe/share/*'
+  '/world-vibe/share/*',
+  '/c/*'
 ];
 
 const documents = await Promise.all([
@@ -31,7 +32,7 @@ assert.deepEqual(detail.appIDs, [expectedAppID], 'only the production SomaCheck 
 assert.deepEqual(
   detail.components.map((component) => component['/']),
   expectedPaths,
-  'AASA must authorize only auth callbacks, shared statements, and World Vibe topic shares'
+  'AASA must authorize only auth callbacks, shared statements, World Vibe topic shares, and circle invites'
 );
 assert.deepEqual(aasa.webcredentials.apps, [expectedAppID], 'web credentials must retain the production SomaCheck app ID');
 
@@ -51,7 +52,8 @@ for (const pathname of [
   '/auth/callback?code=redacted',
   '/s/statement-token',
   '/world-vibe/share/gut-vs-dashboard',
-  '/world-vibe/share/gut-vs-dashboard/'
+  '/world-vibe/share/gut-vs-dashboard/',
+  '/c/circle-invite-token'
 ]) {
   assert.equal(isAppLinked(pathname), true, `${pathname} must remain app-linked`);
 }
