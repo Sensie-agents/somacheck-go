@@ -43,7 +43,8 @@ function componentMatches(pathname, pattern) {
   return new RegExp(`^${escaped}$`).test(pathname);
 }
 
-function isAppLinked(pathname) {
+function isAppLinked(urlOrPath) {
+  const pathname = new URL(urlOrPath, 'https://go.somacheck.com').pathname;
   return expectedPaths.some((pattern) => componentMatches(pathname, pattern));
 }
 
