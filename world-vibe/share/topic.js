@@ -3,7 +3,9 @@
 
   var API_BASE = window.SOMACHECK_API_BASE || 'https://pbldcmniommltbdwuykk.supabase.co/functions/v1/statement-api';
   var SMART_ROUTE_ORIGIN = 'https://link.somacheck.com';
-  var INSTALL_URL = 'https://testflight.apple.com/join/C4mAH3zz';
+  // world-vibe/config.js sets window.SOMACHECK_INSTALL_URL; this literal is a
+  // fallback only for environments that don't load that file.
+  var INSTALL_URL = window.SOMACHECK_INSTALL_URL || 'https://testflight.apple.com/join/C4mAH3zz';
   var BRANCH_LONG_LINK_PATH = /^\/a\/key_(?:live|test)_[A-Za-z0-9]+$/;
   var SMART_ROUTE_KEYS = [
     'route_version', 'topic_slug', 'prompt_id', '$canonical_url', '$fallback_url',
@@ -83,7 +85,7 @@
       return;
     }
     progress.innerHTML = '<strong>World Vibe unlocked</strong>' +
-      'Aligned ' + Math.round((aligned / count) * 100) + '% · Unaligned ' +
+      'What participants noticed: Aligned ' + Math.round((aligned / count) * 100) + '% · Unaligned ' +
       Math.round((unaligned / count) * 100) + '%<br>' + formatTimestamp(topic.last_completed_at);
   }
 

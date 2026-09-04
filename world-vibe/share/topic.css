@@ -7,6 +7,7 @@
   --emerald: #12a594;
   --emerald-hover: #0e8576;
   --emerald-soft: rgba(18, 165, 148, 0.10);
+  --emerald-text: #0c6b60;
   --border: #e8e0d4;
 }
 
@@ -19,6 +20,7 @@
     --faint: #7f898f;
     --border: #252b2f;
     --emerald-soft: rgba(18, 165, 148, 0.14);
+    --emerald-text: #12a594;
   }
 }
 
@@ -46,7 +48,7 @@ body {
 }
 
 .brand, .tag {
-  color: var(--emerald);
+  color: var(--emerald-text);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: .16em;
@@ -121,13 +123,18 @@ blockquote {
 
 .button-primary { background: var(--emerald); color: #fff; }
 .button-primary:hover { background: var(--emerald-hover); }
-.button-secondary { background: var(--emerald-soft); color: var(--emerald); }
+.button-secondary { background: var(--emerald-soft); color: var(--emerald-text); }
 .button[aria-disabled="true"] { opacity: .58; cursor: wait; }
+.button:focus-visible, a:focus-visible, button:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
 
 .status { min-height: 22px; margin: 0 0 14px; }
 .status.error { color: #b94e48; }
 .privacy { margin: 0; }
 
 .footer { margin-top: 24px; }
-.footer a { color: var(--emerald); }
+.footer a { color: var(--emerald-text); }
 
