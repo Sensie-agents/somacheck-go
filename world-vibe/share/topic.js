@@ -69,6 +69,37 @@
     status.className = 'status' + (isError ? ' error' : '');
   }
 
+  function replaceStart(next) {
+    start.parentNode.replaceChild(next, start);
+    start = next;
+  }
+
+  function showDestination(text, href, isSmartRoute) {
+    var link = document.createElement('a');
+    link.className = 'button button-primary';
+    link.id = 'start-check-in';
+    link.href = href;
+    link.textContent = text;
+    link.dataset.action = 'route';
+    if (isSmartRoute) link.dataset.routeReady = 'true';
+    replaceStart(link);
+  }
+
+  function showStartButton(text, action, disabled) {
+    var button = document.createElement('button');
+    button.className = 'button button-primary';
+    button.id = 'start-check-in';
+    button.type = 'button';
+    button.textContent = text;
+    button.dataset.action = action;
+    button.disabled = disabled;
+    if (action === 'retry') button.dataset.retryReady = 'true';
+    button.addEventListener('click', function() {
+      if (button.dataset.action === 'retry') loadTopic();
+    });
+    replaceStart(button);
+  }
+
   function renderProgress(topic) {
     var count = Number(topic.contributor_count);
     var threshold = Number(topic.unlock_threshold) || 5;
@@ -99,9 +130,7 @@
 
   function applyTopic(topic) {
     if (!topic) {
-      start.href = '/world-vibe/?t=' + encodeURIComponent(topicSlug);
-      start.textContent = 'Open World Vibe';
-      start.removeAttribute('aria-disabled');
+      showDestination('Open World Vibe', '/world-vibe/?t=' + encodeURIComponent(topicSlug), false);
       setStatus('This topic could not be loaded here. Open World Vibe to try again.', true);
       return;
     }
@@ -109,38 +138,22 @@
     renderProgress(topic);
     var route = smartTopicRoute(topic.route_url, topic.prompt_id);
     if (route) {
-      start.href = route;
-      start.textContent = 'Open in SomaCheck';
-      start.removeAttribute('aria-disabled');
-      start.dataset.routeReady = 'true';
-      start.dataset.action = 'route';
+      showDestination('Open in SomaCheck', route, true);
       setStatus('', false);
       return;
     }
-    start.href = '/world-vibe/?t=' + encodeURIComponent(topicSlug);
-    start.textContent = 'Open World Vibe';
-    start.removeAttribute('aria-disabled');
+    showDestination('Open World Vibe', '/world-vibe/?t=' + encodeURIComponent(topicSlug), false);
     setStatus('Open World Vibe to prepare this check-in.', false);
   }
 
   function prepareTopicLoad() {
-    start.removeAttribute('href');
-    start.textContent = 'Preparing SomaCheck...';
-    start.setAttribute('aria-disabled', 'true');
-    delete start.dataset.routeReady;
-    delete start.dataset.retryReady;
-    start.dataset.action = 'loading';
+    showStartButton('Preparing SomaCheck...', 'loading', true);
     setStatus('', false);
   }
 
   function showRetry(message) {
     activePromptId = null;
-    start.removeAttribute('href');
-    start.textContent = 'Retry handoff';
-    start.removeAttribute('aria-disabled');
-    delete start.dataset.routeReady;
-    start.dataset.retryReady = 'true';
-    start.dataset.action = 'retry';
+    showStartButton('Retry handoff', 'retry', false);
     setStatus(message, true);
   }
 
@@ -205,15 +218,6 @@
       });
     }, jitteredDelay(backoff));
   }
-
-  start.addEventListener('click', function(event) {
-    if (start.dataset.action === 'retry') {
-      event.preventDefault();
-      loadTopic();
-      return;
-    }
-    if (!start.href) event.preventDefault();
-  });
 
   share.addEventListener('click', function() {
     var text = "World Vibe: '" + expectedStatement + "'. Open it in SomaCheck: " + stableUrl;

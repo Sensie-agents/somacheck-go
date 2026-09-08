@@ -184,11 +184,15 @@ try {
     assert.equal(page.url(), `${origin}/world-vibe/share/${topic.slug}/`, `${topic.slug}: passive load must stay on the stable page`);
     assert.equal(requests.some((request) => request.method !== 'GET'), false, `${topic.slug}: passive activity must be GET-only`);
     assert.equal(requests.some((request) => request.path.includes('/join')), false, `${topic.slug}: passive activity must never join`);
-    assert.equal(await page.locator('blockquote').textContent(), topic.statement, `${topic.slug}: exact statement text must render`);
+    assert.equal(await page.locator('.statement').textContent(), topic.statement, `${topic.slug}: exact statement text must render`);
+    const domOrder = await page.evaluate(() => Array.from(document.querySelector('.card').children).map((node) => node.id || node.className));
+    assert.deepEqual(domOrder.slice(0, 2), ['statement', 'actions'], `${topic.slug}: accessible order must begin with the exact statement and primary action group`);
+    assert.ok(domOrder.indexOf('actions') < domOrder.indexOf('progress'), `${topic.slug}: aggregate progress must follow the handoff action in accessible order`);
+    assert.ok(domOrder.indexOf('actions') < domOrder.indexOf('setup-note'), `${topic.slug}: setup detail must follow the handoff action in accessible order`);
     const mobileOrder = await page.evaluate(() => {
-      const statement = document.querySelector('blockquote').getBoundingClientRect();
+      const statement = document.querySelector('.statement').getBoundingClientRect();
       const brand = document.querySelector('.brand').getBoundingClientRect();
-      const heading = document.querySelector('h1').getBoundingClientRect();
+      const heading = document.querySelector('.topic-heading h2').getBoundingClientRect();
       return { statementTop: statement.top, brandTop: brand.top, headingTop: heading.top };
     });
     assert.ok(mobileOrder.statementTop < mobileOrder.brandTop, `${topic.slug}: phone must place the exact statement before the brand`);
@@ -265,11 +269,16 @@ try {
   });
   await retry.goto(`${origin}/world-vibe/share/gut-vs-dashboard/`, { waitUntil: 'domcontentloaded' });
   await retry.locator('#start-check-in[data-retry-ready="true"]').waitFor();
+  assert.equal(await retry.locator('#start-check-in').evaluate((node) => node.tagName), 'BUTTON', 'retry must be a native keyboard-operable button');
+  assert.equal(await retry.locator('#start-check-in').isDisabled(), false, 'retry button must be enabled');
   assert.equal(await retry.locator('#start-check-in').textContent(), 'Retry handoff', 'topics-load timeout must expose a user-triggered retry in the same CTA slot');
   assert.match(await retry.locator('#status').textContent(), /This is taking longer than expected\. Retry when you are ready\./, 'topics-load timeout must be explicit and bounded');
   assert.equal(requests.some((request) => request.path.includes('/join')), false, 'topics-load timeout must not join');
   const beforeRetryGets = requests.filter((request) => request.path === '/api/v1/public/world-vibe/topics').length;
-  await retry.locator('#start-check-in').click();
+  await retry.evaluate(() => document.activeElement.blur());
+  await retry.keyboard.press('Tab');
+  assert.equal(await retry.evaluate(() => document.activeElement.id), 'start-check-in', 'retry must be first in sequential keyboard focus order');
+  await retry.keyboard.press('Enter');
   await retry.locator('#start-check-in[data-route-ready="true"]').waitFor();
   assert.equal(requests.filter((request) => request.path === '/api/v1/public/world-vibe/topics').length, beforeRetryGets + 1, 'retry tap must issue exactly one new topics GET');
   assert.equal(await retry.locator('#start-check-in').textContent(), 'Open in SomaCheck', 'successful retry must restore the route handoff CTA');
