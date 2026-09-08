@@ -561,6 +561,14 @@
         return latest;
       }
 
+      function rateLimitMessage(data) {
+        var seconds = data && Number(data.retry_after_seconds);
+        if (Number.isFinite(seconds) && seconds > 0 && seconds <= 3600) {
+          return 'This World Vibe is busy. Try again in about ' + Math.ceil(seconds) + ' seconds.';
+        }
+        return 'This World Vibe is busy. Please try again in a moment.';
+      }
+
       function onAnswerClick(btn, topics) {
         var topic = topics.find(function(t) { return t.id === btn.dataset.topicId; });
         if (!topic) return;
@@ -595,7 +603,7 @@
               data = null;
             }
             if (data && data.error === 'challenge_required') {
-              setStatus(topic.id, 'This check-in could not be opened right now. Please try again later.', true);
+              setStatus(topic.id, rateLimitMessage(data), false);
               btn.disabled = false;
               return;
             }
@@ -605,7 +613,7 @@
               return;
             }
             if (r.status === 429) {
-              setStatus(topic.id, 'This venue is busy. Please try again in a moment.', false);
+              setStatus(topic.id, rateLimitMessage(data), false);
               btn.disabled = false;
               return;
             }

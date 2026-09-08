@@ -389,9 +389,9 @@ async function runChallengeRequiredProof(browser) {
   const joinStart = joinRequests.length;
   const requestStart = requestLog.length;
   const challengeServer = await startPortalServer({
-    joinStatus: 403,
+    joinStatus: 429,
     joinResponse: function() {
-      return { error: 'challenge_required' };
+      return { error: 'challenge_required', retry_after_seconds: 45 };
     }
   });
   const origin = `http://127.0.0.1:${challengeServer.address().port}`;
@@ -405,7 +405,7 @@ async function runChallengeRequiredProof(browser) {
     await page.locator('#topic-gut-vs-dashboard .answer-btn').click();
     await page.waitForFunction(function() {
       var statusEl = document.querySelector('#topic-gut-vs-dashboard [data-role="status"]');
-      return statusEl && statusEl.textContent === 'This check-in could not be opened right now. Please try again later.';
+      return statusEl && statusEl.textContent === 'This World Vibe is busy. Try again in about 45 seconds.';
     });
     await page.waitForTimeout(350);
 
@@ -413,16 +413,15 @@ async function runChallengeRequiredProof(browser) {
     const requestDelta = requestLog.slice(requestStart).filter(function(entry) {
       return entry.pathname.endsWith('/join');
     }).length;
-    assert.equal(joinDelta, 1, 'challenge_required must trigger exactly one join attempt');
-    assert.equal(requestDelta, 1, 'challenge_required must not be retried automatically');
-    assert.deepEqual(track.navigations.slice(navigationsBefore), [], 'challenge_required must not navigate anywhere');
-    assert.deepEqual(track.scriptNavigations, [], 'challenge_required must not start any script navigation');
-    assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').evaluate(function(node) { return node.tagName; }), 'BUTTON', 'challenge_required must fail closed without issuing a statement link');
-    assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').textContent(), 'Open in SomaCheck', 'challenge_required must preserve the explicit app handoff action');
-    assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').isDisabled(), false, 'challenge_required should allow a later manual retry');
-    assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="status"]').textContent(), 'This check-in could not be opened right now. Please try again later.', 'challenge_required must surface its own fail-closed copy');
-    assert.notEqual(await page.locator('#topic-gut-vs-dashboard [data-role="status"]').textContent(), 'This venue is busy. Please try again in a moment.', 'challenge_required copy must stay distinct from the 429 quota path');
-    assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="qr"]').getAttribute('data-payload'), expectedStableRoute, 'challenge_required must not replace the stable topic route');
+    assert.equal(joinDelta, 1, 'legacy challenge response must trigger exactly one join attempt');
+    assert.equal(requestDelta, 1, 'legacy challenge response must not be retried automatically');
+    assert.deepEqual(track.navigations.slice(navigationsBefore), [], 'legacy challenge response must not navigate anywhere');
+    assert.deepEqual(track.scriptNavigations, [], 'legacy challenge response must not start any script navigation');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').evaluate(function(node) { return node.tagName; }), 'BUTTON', 'legacy challenge response must fail closed without issuing a statement link');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').textContent(), 'Open in SomaCheck', 'legacy challenge response must preserve the explicit app handoff action');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').isDisabled(), false, 'legacy challenge response should allow a later manual retry');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="status"]').textContent(), 'This World Vibe is busy. Try again in about 45 seconds.', 'legacy challenge response must collapse to the retryable busy state');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="qr"]').getAttribute('data-payload'), expectedStableRoute, 'legacy challenge response must not replace the stable topic route');
     return { recognized: true, joinDelta: joinDelta, requestDelta: requestDelta };
   } finally {
     await page.close();
@@ -742,8 +741,8 @@ async function runFallbackStatusProof(browser) {
   progressHits.clear();
   const cases = {
     'wv-created-201': { status: 201, body: { statement_id: 'stmt_201', link_url: 'https://go.somacheck.com/s/personal-201', app_url: 'somacheck://s/personal-201' }, expectStatus: 'Your check-in is ready in SomaCheck.', link: true },
-    'wv-challenge-200': { status: 200, body: { error: 'challenge_required' }, expectStatus: 'This check-in could not be opened right now. Please try again later.' },
-    'wv-rate-limit-429': { status: 429, body: { error: 'rate_limited' }, expectStatus: 'This venue is busy. Please try again in a moment.' },
+    'wv-challenge-200': { status: 200, body: { error: 'challenge_required', retry_after_seconds: 30 }, expectStatus: 'This World Vibe is busy. Try again in about 30 seconds.' },
+    'wv-rate-limit-429': { status: 429, body: { error: 'rate_limit_exceeded', retry_after_seconds: 45 }, expectStatus: 'This World Vibe is busy. Try again in about 45 seconds.' },
     'wv-retired-404': { status: 404, body: { error: 'not_found' }, expectStatus: 'This topic has been retired.' },
     'wv-server-500': { status: 500, body: { error: 'internal' }, expectStatus: 'Something went wrong. Please try again.' },
     'wv-malformed-200': { status: 200, raw: 'not-json{', expectStatus: 'Something went wrong. Please try again.' },
