@@ -16,16 +16,21 @@
 </head>
 <body>
   <main class="card" data-world-vibe-topic="ai-at-work" data-statement="I feel hopeful about AI at work">
-    <div class="brand">SomaCheck</div>
-    <h1>World Vibe</h1>
-    <div class="tag">Work</div>
-    <blockquote>I feel hopeful about AI at work</blockquote>
+    <div class="topic-heading">
+      <div class="brand">SomaCheck</div>
+      <h1>World Vibe</h1>
+      <div class="tag">Work</div>
+    </div>
+    <blockquote class="statement">I feel hopeful about AI at work</blockquote>
     <div class="progress" id="progress" aria-live="polite">Loading World Vibe progress...</div>
-    <img class="qr" src="/world-vibe/assets/qr-ai-at-work.png" alt="QR code for I feel hopeful about AI at work">
-    <p class="qr-caption">Scan to open this topic from another screen.</p>
+    <div class="qr-panel">
+      <img class="qr" src="/world-vibe/assets/qr-ai-at-work.png" alt="QR code for I feel hopeful about AI at work">
+      <p class="qr-caption">Scan to open this topic from another screen.</p>
+    </div>
+    <p class="setup-note">SomaCheck may need installation or setup. The check-in itself takes three seconds.</p>
     <div class="actions">
-      <a class="button button-primary" id="start-check-in" aria-disabled="true">Preparing your check-in...</a>
-      <button class="button button-secondary" id="share-topic" type="button">Share this World Vibe</button>
+      <a class="button button-primary" id="start-check-in" aria-disabled="true">Preparing SomaCheck...</a>
+      <button class="button button-secondary share-secondary" id="share-topic" type="button">Share this World Vibe</button>
     </div>
     <p class="status" id="status" aria-live="polite"></p>
     <p class="privacy">Your identity is not shown. Results appear only in aggregate. Limited routing data may return you to this topic after installation.</p>

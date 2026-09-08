@@ -179,8 +179,7 @@
     }
     .status { margin-top: 14px; font-size: .95rem; color: var(--muted); }
     .status.error { color: #b94e48; }
-    .privacy-line { color: var(--faint); font-size: .88rem; }
-    .topic-updated { color: var(--faint); font-size: .82rem; font-family: var(--font-mono); }
+    .privacy-line { color: var(--faint); font-size: .88rem; margin-top: 14px; }
     .empty, .error { text-align: center; color: var(--muted); padding: 80px 24px; }
     footer { text-align: center; color: var(--faint); font-size: 13px; margin-top: 80px; }
     footer nav { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -189,10 +188,13 @@
     .last-updated { text-align: center; color: var(--faint); font-size: 12px; margin-top: 16px; font-family: var(--font-mono); }
     @media (max-width: 720px) {
       .topic-body { grid-template-columns: 1fr; }
-      .qr { order: -1; }
-      .qr img { margin: 0 auto; }
+      .qr, .share-btn { display: none; }
       .actions { flex-direction: column; }
       .btn { width: 100%; }
+    }
+    @media print {
+      .qr { display: block !important; }
+      .share-btn { display: none !important; }
     }
   </style>
 </head>
@@ -201,7 +203,7 @@
     <header>
       <div class="brand">SomaCheck</div>
       <h1>World Vibe</h1>
-      <p class="lede">Topics shaping work, culture, and leadership. Open one in SomaCheck, add your check-in in 3 seconds, and watch the aggregate unlock.</p>
+      <p class="lede">Choose a statement and open it in SomaCheck. The check-in takes three seconds after any one-time installation, account setup, and calibration.</p>
     </header>
 
     <div class="how">
@@ -227,7 +229,7 @@
         <a href="/terms">Terms</a>
         <a href="/support">Support</a>
       </nav>
-      <p>Part of SomaCheck research trials in measurable resilience.</p>
+      <p>World Vibe is a general-wellness experience from SomaCheck.</p>
     </footer>
   </main>
 
@@ -354,12 +356,6 @@
         state.sessionNonce = nonce || createNonce();
         return state.sessionNonce;
       }
-      function formatTimestamp(ts) {
-        if (!ts) return 'Waiting for the first completed check-in';
-        var d = new Date(ts);
-        if (isNaN(d.getTime())) return 'Waiting for the first completed check-in';
-        return 'Last check-in ' + d.toLocaleString();
-      }
       function normalizeProgress(raw) {
         raw = raw || {};
         var threshold = Number(raw.unlock_threshold || raw.threshold || DEFAULT_THRESHOLD) || DEFAULT_THRESHOLD;
@@ -427,11 +423,11 @@
               '<div class="qr">' +
                 '<div class="qr-image" data-role="qr" data-payload="' + escapeHtml(topic.routeUrl) + '" title="' + escapeHtml(topic.routeUrl) + '" aria-label="QR code for ' + escapeHtml(topic.statement) + '"></div>' +
                 '<div class="qr-caption" data-role="qr-caption">Scan to open this topic</div>' +
-                '<div class="route-note" data-install-url="' + escapeHtml(APP_INSTALL_URL) + '">If SomaCheck is installed, this route opens the topic in the app. If not, the configured install route can return you to this topic.</div>' +
+                '<div class="route-note" data-install-url="' + escapeHtml(APP_INSTALL_URL) + '">SomaCheck may need installation or setup. The check-in itself takes three seconds.</div>' +
               '</div>' +
             '</div>' +
             '<div class="actions">' +
-              '<button class="btn btn-primary answer-btn" data-topic-id="' + topic.id + '">Start your check-in</button>' +
+              '<button class="btn btn-primary answer-btn" data-topic-id="' + topic.id + '">Open in SomaCheck</button>' +
               '<button class="btn btn-secondary share-btn" data-topic-id="' + topic.id + '">Share this World Vibe</button>' +
             '</div>' +
             '<div class="privacy-line">Your identity is not shown. Results appear only in aggregate. If you install first, limited routing data may be used to return you to this topic.</div>' +
@@ -509,7 +505,6 @@
             '<div class="value">' + progress.contributorCount + ' of ' + progress.threshold + '</div>' +
             '<div class="label">check-ins</div>' +
             '<div class="hint">Results appear after ' + progress.threshold + ' people join.</div>' +
-            '<div class="topic-updated">' + escapeHtml(formatTimestamp(progress.lastCompletedAt)) + '</div>' +
           '</div>';
         }
 
@@ -523,15 +518,8 @@
         splitHtml += '<div class="split-row"><span>Unaligned</span><strong>' + (unalignedPct !== null ? unalignedPct + '%' : (unalignedTotal !== null ? unalignedTotal.toLocaleString() : 'Live')) + '</strong></div>';
         splitHtml += '</div>';
 
-        var countriesHtml = Object.keys(progress.countries || {})
-          .map(function(code) {
-            return '<span class="country">' + escapeHtml(code) + ' ' + progress.countries[code] + '%</span>';
-          }).join('');
-
         return splitHtml +
-          '<div class="stat"><span class="value">' + total.toLocaleString() + '</span><span class="label">check-ins</span></div>' +
-          '<div class="topic-updated">' + escapeHtml(formatTimestamp(progress.lastCompletedAt)) + '</div>' +
-          (countriesHtml ? '<div class="countries">' + countriesHtml + '</div>' : '');
+          '<div class="stat"><span class="value">' + total.toLocaleString() + '</span><span class="label">check-ins</span></div>';
       }
 
       function updateTopic(topic) {
@@ -617,7 +605,7 @@
               return;
             }
             if (r.status === 429) {
-              setStatus(topic.id, 'the world is busy today, come back tomorrow', false);
+              setStatus(topic.id, 'This venue is busy. Please try again in a moment.', false);
               btn.disabled = false;
               return;
             }
@@ -679,7 +667,7 @@
       function updateLastUpdated(ts) {
         var el = document.getElementById('last-updated');
         if (!el) return;
-        el.textContent = formatTimestamp(ts);
+        el.textContent = '';
       }
 
       function loadTopicsCatalog() {

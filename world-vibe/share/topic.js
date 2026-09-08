@@ -6,6 +6,7 @@
   // world-vibe/config.js sets window.SOMACHECK_INSTALL_URL; this literal is a
   // fallback only for environments that don't load that file.
   var INSTALL_URL = window.SOMACHECK_INSTALL_URL || 'https://testflight.apple.com/join/C4mAH3zz';
+  var TOPICS_TIMEOUT_MS = Number(window.SOMACHECK_TOPICS_TIMEOUT_MS) || 8000;
   var BRANCH_LONG_LINK_PATH = /^\/a\/key_(?:live|test)_[A-Za-z0-9]+$/;
   var SMART_ROUTE_KEYS = [
     'route_version', 'topic_slug', 'prompt_id', '$canonical_url', '$fallback_url',
@@ -24,6 +25,8 @@
   var share = document.getElementById('share-topic');
   var status = document.getElementById('status');
   var activePromptId = null;
+  var loadAttempt = 0;
+  var loadController = null;
 
   function exactParam(params, key, expected) {
     var values = params.getAll(key);
@@ -61,13 +64,6 @@
     status.className = 'status' + (isError ? ' error' : '');
   }
 
-  function formatTimestamp(value) {
-    if (!value) return 'Waiting for the first completed check-in';
-    var date = new Date(value);
-    if (isNaN(date.getTime())) return 'Waiting for the first completed check-in';
-    return 'Last check-in ' + date.toLocaleString();
-  }
-
   function renderProgress(topic) {
     var count = Number(topic.contributor_count);
     var threshold = Number(topic.unlock_threshold) || 5;
@@ -75,7 +71,7 @@
     var unlocked = topic.unlocked === true && count >= threshold;
     if (!unlocked) {
       progress.innerHTML = '<strong>' + count + ' of ' + threshold + ' check-ins</strong>' +
-        'Results appear after ' + threshold + ' people join.<br>' + formatTimestamp(topic.last_completed_at);
+        'Results appear after ' + threshold + ' people join.';
       return;
     }
     var aligned = Number(topic.aligned);
@@ -86,7 +82,7 @@
     }
     progress.innerHTML = '<strong>World Vibe unlocked</strong>' +
       'What participants noticed: Aligned ' + Math.round((aligned / count) * 100) + '% · Unaligned ' +
-      Math.round((unaligned / count) * 100) + '%<br>' + formatTimestamp(topic.last_completed_at);
+      Math.round((unaligned / count) * 100) + '%';
   }
 
   function findTopic(data) {
@@ -109,9 +105,10 @@
     var route = smartTopicRoute(topic.route_url, topic.prompt_id);
     if (route) {
       start.href = route;
-      start.textContent = 'Start your check-in';
+      start.textContent = 'Open in SomaCheck';
       start.removeAttribute('aria-disabled');
       start.dataset.routeReady = 'true';
+      start.dataset.action = 'route';
       setStatus('', false);
       return;
     }
@@ -121,14 +118,55 @@
     setStatus('Open World Vibe to prepare this check-in.', false);
   }
 
+  function prepareTopicLoad() {
+    start.removeAttribute('href');
+    start.textContent = 'Preparing SomaCheck...';
+    start.setAttribute('aria-disabled', 'true');
+    delete start.dataset.routeReady;
+    delete start.dataset.retryReady;
+    start.dataset.action = 'loading';
+    setStatus('', false);
+  }
+
+  function showRetry(message) {
+    activePromptId = null;
+    start.removeAttribute('href');
+    start.textContent = 'Retry handoff';
+    start.removeAttribute('aria-disabled');
+    delete start.dataset.routeReady;
+    start.dataset.retryReady = 'true';
+    start.dataset.action = 'retry';
+    setStatus(message, true);
+  }
+
   function loadTopic() {
-    return fetch(API_BASE + '/v1/public/world-vibe/topics', { method: 'GET' })
+    var attempt = ++loadAttempt;
+    if (loadController) loadController.abort();
+    var controller = typeof AbortController === 'function' ? new AbortController() : null;
+    loadController = controller;
+    prepareTopicLoad();
+    var timeoutId = window.setTimeout(function() {
+      if (controller && attempt === loadAttempt) controller.abort();
+    }, TOPICS_TIMEOUT_MS);
+    var options = { method: 'GET' };
+    if (controller) options.signal = controller.signal;
+    return fetch(API_BASE + '/v1/public/world-vibe/topics', options)
       .then(function(response) {
         if (!response.ok) throw new Error('topics-unavailable');
         return response.json();
       })
-      .then(function(data) { applyTopic(findTopic(data)); })
-      .catch(function() { applyTopic(null); });
+      .then(function(data) {
+        if (attempt === loadAttempt) applyTopic(findTopic(data));
+      })
+      .catch(function(error) {
+        if (attempt !== loadAttempt) return;
+        if (error && error.name === 'AbortError') {
+          showRetry('This is taking longer than expected. Retry when you are ready.');
+          return;
+        }
+        showRetry('SomaCheck could not be prepared. Check your connection and retry.');
+      })
+      .finally(function() { window.clearTimeout(timeoutId); });
   }
 
   function refreshProgress() {
@@ -145,6 +183,11 @@
   }
 
   start.addEventListener('click', function(event) {
+    if (start.dataset.action === 'retry') {
+      event.preventDefault();
+      loadTopic();
+      return;
+    }
     if (!start.href) event.preventDefault();
   });
 

@@ -96,7 +96,9 @@ const browser = await chromium.launch({ headless: true });
 const viewports = [
   { label: '320w', width: 320, height: 720 },
   { label: '375w', width: 375, height: 812 },
+  { label: '414w', width: 414, height: 896 },
   { label: '430w', width: 430, height: 932 },
+  { label: '768w', width: 768, height: 1024 },
   { label: '1024w', width: 1024, height: 800 },
   { label: '1440w', width: 1440, height: 900 }
 ];
@@ -136,22 +138,37 @@ try {
       const ctas = page.locator(pageInfo.ctaSelector);
       const count = await ctas.count();
       assert.ok(count > 0, `${pageInfo.label}@${viewport.label}: at least one CTA must be present`);
+      const visibleCtaIndexes = [];
       for (let i = 0; i < count; i += 1) {
         const cta = ctas.nth(i);
+        if (!await cta.isVisible()) continue;
+        visibleCtaIndexes.push(i);
         const box = await cta.boundingBox();
         assert.ok(box, `${pageInfo.label}@${viewport.label}: CTA ${i} must be visible`);
         assert.ok(box.height >= 44, `${pageInfo.label}@${viewport.label}: CTA ${i} height ${box.height} must be >= 44px`);
         const name = (await cta.textContent() || '').trim();
         assert.ok(name.length > 0, `${pageInfo.label}@${viewport.label}: CTA ${i} must have a non-empty accessible name`);
       }
+      assert.ok(visibleCtaIndexes.length > 0, `${pageInfo.label}@${viewport.label}: at least one CTA must be visible`);
+
+      if (pageInfo.label === 'share') {
+        const phoneLayout = viewport.width <= 700;
+        assert.equal(visibleCtaIndexes.length, phoneLayout ? 1 : 2, `${pageInfo.label}@${viewport.label}: action count must match the device layout`);
+        assert.equal(await page.locator('.qr-panel').isVisible(), !phoneLayout, `${pageInfo.label}@${viewport.label}: QR visibility must match the device layout`);
+      } else {
+        const phoneLayout = viewport.width <= 720;
+        const topicCount = await page.locator('.topic').count();
+        assert.equal(visibleCtaIndexes.length, topicCount * (phoneLayout ? 1 : 2), `${pageInfo.label}@${viewport.label}: each topic must have the correct action count`);
+        assert.equal(await page.locator('.topic .qr').first().isVisible(), !phoneLayout, `${pageInfo.label}@${viewport.label}: QR visibility must match the device layout`);
+      }
 
       // Visible focus ring: tab to the first CTA and confirm a real outline renders.
-      await page.locator(pageInfo.ctaSelector).first().focus();
-      const outline = await page.evaluate((sel) => {
-        const el = document.querySelector(sel.split(',')[0].trim());
+      await ctas.nth(visibleCtaIndexes[0]).focus();
+      const outline = await page.evaluate(() => {
+        const el = document.activeElement;
         const style = getComputedStyle(el);
         return { outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth };
-      }, pageInfo.ctaSelector);
+      });
       assert.notEqual(outline.outlineStyle, 'none', `${pageInfo.label}@${viewport.label}: focused CTA must show a visible outline`);
       assert.notEqual(outline.outlineWidth, '0px', `${pageInfo.label}@${viewport.label}: focused CTA outline must have nonzero width`);
 
@@ -159,7 +176,7 @@ try {
       await page.screenshot({ path: screenshotPath, fullPage: true });
       screenshots.push(screenshotPath);
 
-      results.push({ page: pageInfo.label, viewport: viewport.label, ctas: count, outline });
+      results.push({ page: pageInfo.label, viewport: viewport.label, ctas: visibleCtaIndexes.length, outline });
       await page.close();
     }
   }
