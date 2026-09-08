@@ -26,7 +26,10 @@ assert.match(source, /session_nonce/, 'join flow must send session_nonce');
 assert.match(source, /sessionStorage/, 'session nonce must be scoped to sessionStorage');
 assert.doesNotMatch(source, /localStorage|document\.cookie/, 'session nonce must not use persistent browser tracking storage');
 assert.match(source, /Share this World Vibe/, 'portal must expose the concise share CTA');
-assert.match(source, /setInterval\(function\(\) \{[\s\S]*POLL_MS\);/, 'portal must poll on a 5 to 10 second timer');
+assert.doesNotMatch(source, /setInterval\(/, 'portal must not synchronize venue clients on a fixed interval');
+assert.match(source, /Math\.random\(\)/, 'portal aggregate refresh must include jitter');
+assert.match(source, /POLL_MAX_MS/, 'portal aggregate refresh must use a bounded backoff');
+assert.match(source, /visibilitychange/, 'portal aggregate refresh must pause and resume with page visibility');
 assert.match(source, /route_url/, 'one-tap flow must read the public topic route_url');
 assert.match(source, /window\.location\.assign\(topic\.smartRouteUrl\)/, 'one-tap flow must navigate the current tab to the validated smart route');
 assert.doesNotMatch(source, /window\.open\(|target="_blank"/, 'one-tap flow must not open a new tab or window');
@@ -171,15 +174,15 @@ function withInjectedConfig(html, origin) {
   const injected = [
     `<script>window.SOMACHECK_API_BASE = ${JSON.stringify(`${origin}/api`)};`,
     `window.SOMACHECK_INSTALL_URL = ${JSON.stringify(installUrl)};`,
-    'window.__wvIntervals = [];',
-    'const __wvNativeSetInterval = window.setInterval.bind(window);',
-    'window.setInterval = function(fn, ms) {',
-    '  if (ms === 7000) {',
+    'window.__wvTimeouts = [];',
+    'const __wvNativeSetTimeout = window.setTimeout.bind(window);',
+    'window.setTimeout = function(fn, ms) {',
+    '  if (ms >= 5000) {',
     '    window.__worldVibePoll = fn;',
-    '    window.__wvIntervals.push({ fn: fn, ms: ms });',
+    '    window.__wvTimeouts.push({ fn: fn, ms: ms });',
     '    return 1;',
     '  }',
-    '  return __wvNativeSetInterval(fn, ms);',
+    '  return __wvNativeSetTimeout(fn, ms);',
     '};',
     '</script>'
   ].join('');
@@ -572,6 +575,9 @@ async function runSmartRouteProof(browser) {
     assert.equal(await page.locator('#topic-ai-at-work .route-note').getAttribute('data-install-url'), installUrl, 'install fallback seam must be unchanged on the smart path');
     assert.match(await page.locator('#topic-gut-vs-dashboard .privacy-line').textContent(), /limited routing data may be used/i, 'privacy disclosure must remain on the smart path');
     assert.match(await page.locator('#topic-gut-vs-dashboard [data-role="aggregate"]').textContent(), /1 of 5/, 'locked aggregate must render on the smart path');
+    const initialPollDelays = await page.evaluate(() => window.__wvTimeouts.map((timer) => timer.ms));
+    assert.equal(initialPollDelays.length, 1, 'portal must schedule one aggregate refresh after initialization');
+    assert.ok(initialPollDelays[0] >= 5250 && initialPollDelays[0] <= 8750, 'initial aggregate refresh must jitter around seven seconds');
 
     await page.locator('#topic-gut-vs-dashboard .share-btn').click();
     const shared = await page.evaluate(() => window.__wvShared);
@@ -583,6 +589,9 @@ async function runSmartRouteProof(browser) {
     // Passive activity: poll, scroll, refresh. None of it may join or navigate.
     await page.evaluate(() => window.__worldVibePoll());
     await page.waitForFunction(() => document.querySelector('#topic-gut-vs-dashboard [data-role="aggregate"]').textContent.includes('3 of 5'));
+    await page.waitForFunction(() => window.__wvTimeouts.length >= 2);
+    const latestPollDelay = await page.evaluate(() => window.__wvTimeouts.at(-1).ms);
+    assert.ok(latestPollDelay >= 5250 && latestPollDelay <= 8750, 'a successful refresh must reset to the jittered base interval');
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await page.mouse.wheel(0, 400);
     await page.waitForTimeout(250);

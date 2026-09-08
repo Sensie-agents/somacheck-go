@@ -43,6 +43,10 @@ const [script, style, ...pages] = await Promise.all([
 assert.doesNotMatch(script, /world-vibe\/topics\/[^'"\s]+\/join|method:\s*['"]POST['"]|localStorage|document\.cookie/i, 'stable share runtime must never join, post, or create persistent browser identity');
 assert.match(script, /method:\s*'GET'/, 'stable share runtime may read public topic progress only');
 assert.match(script, /SMART_ROUTE_KEYS/, 'stable share runtime must validate the frozen Branch route shape');
+assert.doesNotMatch(script, /setInterval\(/, 'stable share must not synchronize venue clients on a fixed interval');
+assert.match(script, /Math\.random\(\)/, 'stable share progress refresh must include jitter');
+assert.match(script, /PROGRESS_MAX_MS/, 'stable share progress refresh must use a bounded backoff');
+assert.match(script, /visibilitychange/, 'stable share progress refresh must pause and resume with page visibility');
 assert.doesNotMatch(script + style + pages.join(''), /—|Your answer is anonymous|No tracking/i, 'stable share source must preserve approved copy boundaries');
 for (const [index, html] of pages.entries()) {
   assert.doesNotMatch(html, /Preparing your check-in\.\.\.[\s\S]*fetch\(|\/v0\/public\/topics\/join/i, `${topics[index].slug}: page source must not mint on load`);

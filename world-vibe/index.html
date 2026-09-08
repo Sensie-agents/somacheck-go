@@ -241,7 +241,9 @@
   <script>
     (function() {
       var STATEMENT_API_URL = (typeof window !== 'undefined' && window.SOMACHECK_API_BASE) || 'https://pbldcmniommltbdwuykk.supabase.co/functions/v1/statement-api';
-      var POLL_MS = 7000;
+      var POLL_BASE_MS = 7000;
+      var POLL_MAX_MS = 60000;
+      var POLL_JITTER = 0.25;
       var DEFAULT_THRESHOLD = 5;
       var SESSION_NONCE_STORAGE_KEY = 'world-vibe-session-nonce';
       // Runtime seam can cut over to the App Store after publication.
@@ -254,7 +256,9 @@
         topics: [],
         byId: {},
         initialized: false,
-        sessionNonce: null
+        sessionNonce: null,
+        pollFailures: 0,
+        pollTimer: null
       };
 
       function shareUrl(topic) { return '/world-vibe/share/' + encodeURIComponent(topic.id); }
@@ -701,18 +705,18 @@
         return fetch(STATEMENT_API_URL + '/v1/public/world-vibe/topics/' + encodeURIComponent(topic.id) + '/progress', {
           headers: headers
         }).then(function(r) {
-          if (r.status === 304) return null;
+          if (r.status === 304) return true;
           if (!r.ok) {
-            if (options.silent) return null;
+            if (options.silent) return false;
             throw new Error('progress-unavailable-' + topic.id);
           }
           return r.json().then(function(data) {
             mergeProgress(topic, data, r);
-            return data;
+            return true;
           });
         }).catch(function(err) {
           if (!options.silent) throw err;
-          return null;
+          return false;
         });
       }
 
@@ -720,9 +724,28 @@
         options = options || {};
         return Promise.all(state.topics.map(function(topic) {
           return refreshTopicProgress(topic, { silent: true });
-        })).then(function() {
+        })).then(function(results) {
           updateLastUpdated(maxLastCompletedAt());
+          return results.every(function(succeeded) { return succeeded; });
         });
+      }
+
+      function jitteredPollDelay(base) {
+        return Math.round(base * (1 - POLL_JITTER + (Math.random() * POLL_JITTER * 2)));
+      }
+
+      function scheduleProgressRefresh() {
+        if (state.pollTimer) clearTimeout(state.pollTimer);
+        state.pollTimer = null;
+        if (!state.initialized || document.visibilityState === 'hidden') return;
+        var backoff = Math.min(POLL_MAX_MS, POLL_BASE_MS * Math.pow(2, state.pollFailures));
+        state.pollTimer = setTimeout(function() {
+          state.pollTimer = null;
+          refreshAllProgress({ silent: true }).then(function(succeeded) {
+            state.pollFailures = succeeded ? 0 : Math.min(state.pollFailures + 1, 4);
+            scheduleProgressRefresh();
+          });
+        }, jitteredPollDelay(backoff));
       }
 
       function loadTopics() {
@@ -733,8 +756,10 @@
             updateLastUpdated(maxLastCompletedAt());
             return refreshAllProgress({ silent: true });
           })
-          .then(function() {
+          .then(function(succeeded) {
             state.initialized = true;
+            state.pollFailures = succeeded ? 0 : 1;
+            scheduleProgressRefresh();
           })
           .catch(function(err) {
             document.getElementById('topics').innerHTML = '<div class="error">Topics could not be loaded. Please try again later.</div>';
@@ -743,10 +768,14 @@
       }
 
       loadTopics();
-      setInterval(function() {
-        if (!state.initialized || document.visibilityState === 'hidden') return;
-        refreshAllProgress({ silent: true });
-      }, POLL_MS);
+      document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'hidden') {
+          if (state.pollTimer) clearTimeout(state.pollTimer);
+          state.pollTimer = null;
+          return;
+        }
+        scheduleProgressRefresh();
+      });
     })();
   </script>
 </body>

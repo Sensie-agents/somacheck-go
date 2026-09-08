@@ -7,6 +7,9 @@
   // fallback only for environments that don't load that file.
   var INSTALL_URL = window.SOMACHECK_INSTALL_URL || 'https://testflight.apple.com/join/C4mAH3zz';
   var TOPICS_TIMEOUT_MS = Number(window.SOMACHECK_TOPICS_TIMEOUT_MS) || 8000;
+  var PROGRESS_BASE_MS = 7000;
+  var PROGRESS_MAX_MS = 60000;
+  var PROGRESS_JITTER = 0.25;
   var BRANCH_LONG_LINK_PATH = /^\/a\/key_(?:live|test)_[A-Za-z0-9]+$/;
   var SMART_ROUTE_KEYS = [
     'route_version', 'topic_slug', 'prompt_id', '$canonical_url', '$fallback_url',
@@ -27,6 +30,8 @@
   var activePromptId = null;
   var loadAttempt = 0;
   var loadController = null;
+  var progressFailures = 0;
+  var progressTimer = null;
 
   function exactParam(params, key, expected) {
     var values = params.getAll(key);
@@ -170,16 +175,35 @@
   }
 
   function refreshProgress() {
-    if (!activePromptId || document.hidden) return;
-    fetch(API_BASE + '/v1/public/world-vibe/topics/' + encodeURIComponent(topicSlug) + '/progress', { method: 'GET' })
+    if (!activePromptId || document.hidden) return Promise.resolve(true);
+    return fetch(API_BASE + '/v1/public/world-vibe/topics/' + encodeURIComponent(topicSlug) + '/progress', { method: 'GET' })
       .then(function(response) {
         if (!response.ok) throw new Error('progress-unavailable');
         return response.json();
       })
       .then(function(topic) {
         if (topic.topic_slug === topicSlug && topic.prompt_id === activePromptId) renderProgress(topic);
+        return true;
       })
-      .catch(function() {});
+      .catch(function() { return false; });
+  }
+
+  function jitteredDelay(base) {
+    return Math.round(base * (1 - PROGRESS_JITTER + (Math.random() * PROGRESS_JITTER * 2)));
+  }
+
+  function scheduleProgressRefresh() {
+    if (progressTimer) window.clearTimeout(progressTimer);
+    progressTimer = null;
+    if (!activePromptId || document.hidden) return;
+    var backoff = Math.min(PROGRESS_MAX_MS, PROGRESS_BASE_MS * Math.pow(2, progressFailures));
+    progressTimer = window.setTimeout(function() {
+      progressTimer = null;
+      refreshProgress().then(function(succeeded) {
+        progressFailures = succeeded ? 0 : Math.min(progressFailures + 1, 4);
+        scheduleProgressRefresh();
+      });
+    }, jitteredDelay(backoff));
   }
 
   start.addEventListener('click', function(event) {
@@ -203,7 +227,14 @@
     }
   });
 
-  loadTopic().then(function() {
-    window.setInterval(refreshProgress, 7000);
+  document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+      if (progressTimer) window.clearTimeout(progressTimer);
+      progressTimer = null;
+      return;
+    }
+    scheduleProgressRefresh();
   });
+
+  loadTopic().then(scheduleProgressRefresh);
 })();
