@@ -38,6 +38,8 @@ const FORMATS = Object.freeze([
     dpi: 300,
     qrPixels: 900,
     minimumQrInches: 3,
+    minimumPrivacyPoints: 12,
+    minimumUrlPoints: 10,
     layout: 'portrait',
     padding: 160,
     brandSize: 48,
@@ -45,8 +47,8 @@ const FORMATS = Object.freeze([
     statementSize: 154,
     actionTitleSize: 68,
     actionDetailSize: 48,
-    privacySize: 42,
-    urlSize: 31,
+    privacySize: 52,
+    urlSize: 42,
   },
   {
     id: 'booth-11x17',
@@ -56,6 +58,8 @@ const FORMATS = Object.freeze([
     dpi: 300,
     qrPixels: 1800,
     minimumQrInches: 6,
+    minimumPrivacyPoints: 12,
+    minimumUrlPoints: 12,
     layout: 'portrait',
     padding: 220,
     brandSize: 66,
@@ -64,7 +68,7 @@ const FORMATS = Object.freeze([
     actionTitleSize: 96,
     actionDetailSize: 68,
     privacySize: 56,
-    urlSize: 42,
+    urlSize: 64,
   },
   {
     id: 'arena-4k',
@@ -74,6 +78,8 @@ const FORMATS = Object.freeze([
     dpi: null,
     qrPixels: 1080,
     minimumQrInches: null,
+    minimumPrivacyPoints: null,
+    minimumUrlPoints: null,
     layout: 'landscape',
     padding: 150,
     brandSize: 54,
@@ -263,6 +269,7 @@ function posterHtml({ format, statement, url, qrDataUrl, fontDataUrl }) {
       gap: ${landscape ? 24 : 28}px;
     }
     .qr-frame {
+      box-sizing: content-box;
       width: var(--qr-size);
       height: var(--qr-size);
       padding: ${landscape ? 42 : 48}px;
@@ -345,9 +352,6 @@ async function main() {
       const qrDataUrl = `data:image/png;base64,${qrBytes.toString('base64')}`;
 
       for (const format of FORMATS) {
-        if (format.dpi && format.qrPixels / format.dpi < format.minimumQrInches) {
-          throw new Error(`${format.id} QR is below its minimum physical size`);
-        }
         const page = await browser.newPage({
           viewport: { width: format.width, height: format.height },
           deviceScaleFactor: 1,
@@ -360,6 +364,36 @@ async function main() {
           fontDataUrl,
         }), { waitUntil: 'load' });
         await page.evaluate(() => document.fonts.ready);
+
+        const renderedMetrics = await page.evaluate(() => {
+          const qr = document.querySelector('.qr-frame img').getBoundingClientRect();
+          const frame = document.querySelector('.qr-frame').getBoundingClientRect();
+          const privacy = getComputedStyle(document.querySelector('.privacy'));
+          const fallbackUrl = getComputedStyle(document.querySelector('.fallback-url'));
+          return {
+            qrWidth: qr.width,
+            qrHeight: qr.height,
+            frameWidth: frame.width,
+            frameHeight: frame.height,
+            privacyFontPixels: Number.parseFloat(privacy.fontSize),
+            urlFontPixels: Number.parseFloat(fallbackUrl.fontSize),
+          };
+        });
+        if (renderedMetrics.qrWidth !== format.qrPixels || renderedMetrics.qrHeight !== format.qrPixels) {
+          throw new Error(`${topic.id}/${format.id} QR image is ${renderedMetrics.qrWidth}x${renderedMetrics.qrHeight}, expected ${format.qrPixels}x${format.qrPixels}`);
+        }
+        const qrInches = format.dpi ? renderedMetrics.qrWidth / format.dpi : null;
+        const privacyPoints = format.dpi ? renderedMetrics.privacyFontPixels * 72 / format.dpi : null;
+        const urlPoints = format.dpi ? renderedMetrics.urlFontPixels * 72 / format.dpi : null;
+        if (format.dpi && qrInches < format.minimumQrInches) {
+          throw new Error(`${format.id} rendered QR is below its minimum physical size`);
+        }
+        if (format.dpi && privacyPoints < format.minimumPrivacyPoints) {
+          throw new Error(`${format.id} rendered privacy copy is below its minimum point size`);
+        }
+        if (format.dpi && urlPoints < format.minimumUrlPoints) {
+          throw new Error(`${format.id} rendered fallback URL is below its minimum point size`);
+        }
 
         const overflow = await page.evaluate(() => ({
           width: document.documentElement.scrollWidth,
@@ -412,7 +446,15 @@ async function main() {
           height: format.height,
           dpi: format.dpi,
           qrPixels: format.qrPixels,
-          qrInches: format.dpi ? format.qrPixels / format.dpi : null,
+          qrRenderedWidth: renderedMetrics.qrWidth,
+          qrRenderedHeight: renderedMetrics.qrHeight,
+          qrFrameOuterWidth: renderedMetrics.frameWidth,
+          qrFrameOuterHeight: renderedMetrics.frameHeight,
+          qrInches,
+          privacyFontPixels: renderedMetrics.privacyFontPixels,
+          privacyPoints,
+          urlFontPixels: renderedMetrics.urlFontPixels,
+          urlPoints,
           decodedUrl: renderedDecode,
           sha256: sha256(renderedBytes),
         });
@@ -443,8 +485,8 @@ async function main() {
       actionDetail: ACTION_DETAIL,
       privacyLine: PRIVACY_LINE,
     },
-    formats: FORMATS.map(({ id, label, width, height, dpi, qrPixels, minimumQrInches }) => ({
-      id, label, width, height, dpi, qrPixels, minimumQrInches,
+    formats: FORMATS.map(({ id, label, width, height, dpi, qrPixels, minimumQrInches, minimumPrivacyPoints, minimumUrlPoints }) => ({
+      id, label, width, height, dpi, qrPixels, minimumQrInches, minimumPrivacyPoints, minimumUrlPoints,
     })),
     artifacts,
   };

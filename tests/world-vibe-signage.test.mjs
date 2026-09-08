@@ -42,9 +42,15 @@ try {
       assert.equal(artifact.url, expectedUrl);
       assert.equal(artifact.decodedUrl, expectedUrl);
       assert.match(artifact.sha256, /^[0-9a-f]{64}$/);
+      assert.equal(artifact.qrRenderedWidth, artifact.qrPixels);
+      assert.equal(artifact.qrRenderedHeight, artifact.qrPixels);
+      assert.ok(artifact.qrFrameOuterWidth > artifact.qrRenderedWidth);
+      assert.ok(artifact.qrFrameOuterHeight > artifact.qrRenderedHeight);
       if (artifact.dpi) {
         const format = manifest.formats.find((candidate) => candidate.id === artifact.formatId);
         assert.ok(artifact.qrInches >= format.minimumQrInches);
+        assert.ok(artifact.privacyPoints >= format.minimumPrivacyPoints);
+        assert.ok(artifact.urlPoints >= format.minimumUrlPoints);
       }
 
       const blurredPath = path.join(outputDirectory, `${topic.id}--${artifact.formatId}--blurred.png`);
