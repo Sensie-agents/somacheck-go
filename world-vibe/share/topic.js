@@ -6,6 +6,10 @@
   // world-vibe/config.js sets window.SOMACHECK_INSTALL_URL; this literal is a
   // fallback only for environments that don't load that file.
   var INSTALL_URL = window.SOMACHECK_INSTALL_URL || 'https://testflight.apple.com/join/C4mAH3zz';
+  var TOPICS_TIMEOUT_MS = Number(window.SOMACHECK_TOPICS_TIMEOUT_MS) || 8000;
+  var PROGRESS_BASE_MS = 7000;
+  var PROGRESS_MAX_MS = 60000;
+  var PROGRESS_JITTER = 0.25;
   var BRANCH_LONG_LINK_PATH = /^\/a\/key_(?:live|test)_[A-Za-z0-9]+$/;
   var SMART_ROUTE_KEYS = [
     'route_version', 'topic_slug', 'prompt_id', '$canonical_url', '$fallback_url',
@@ -24,6 +28,10 @@
   var share = document.getElementById('share-topic');
   var status = document.getElementById('status');
   var activePromptId = null;
+  var loadAttempt = 0;
+  var loadController = null;
+  var progressFailures = 0;
+  var progressTimer = null;
 
   function exactParam(params, key, expected) {
     var values = params.getAll(key);
@@ -61,11 +69,35 @@
     status.className = 'status' + (isError ? ' error' : '');
   }
 
-  function formatTimestamp(value) {
-    if (!value) return 'Waiting for the first completed check-in';
-    var date = new Date(value);
-    if (isNaN(date.getTime())) return 'Waiting for the first completed check-in';
-    return 'Last check-in ' + date.toLocaleString();
+  function replaceStart(next) {
+    start.parentNode.replaceChild(next, start);
+    start = next;
+  }
+
+  function showDestination(text, href, isSmartRoute) {
+    var link = document.createElement('a');
+    link.className = 'button button-primary';
+    link.id = 'start-check-in';
+    link.href = href;
+    link.textContent = text;
+    link.dataset.action = 'route';
+    if (isSmartRoute) link.dataset.routeReady = 'true';
+    replaceStart(link);
+  }
+
+  function showStartButton(text, action, disabled) {
+    var button = document.createElement('button');
+    button.className = 'button button-primary';
+    button.id = 'start-check-in';
+    button.type = 'button';
+    button.textContent = text;
+    button.dataset.action = action;
+    button.disabled = disabled;
+    if (action === 'retry') button.dataset.retryReady = 'true';
+    button.addEventListener('click', function() {
+      if (button.dataset.action === 'retry') loadTopic();
+    });
+    replaceStart(button);
   }
 
   function renderProgress(topic) {
@@ -75,7 +107,7 @@
     var unlocked = topic.unlocked === true && count >= threshold;
     if (!unlocked) {
       progress.innerHTML = '<strong>' + count + ' of ' + threshold + ' check-ins</strong>' +
-        'Results appear after ' + threshold + ' people join.<br>' + formatTimestamp(topic.last_completed_at);
+        'Results appear after ' + threshold + ' people join.';
       return;
     }
     var aligned = Number(topic.aligned);
@@ -86,7 +118,7 @@
     }
     progress.innerHTML = '<strong>World Vibe unlocked</strong>' +
       'What participants noticed: Aligned ' + Math.round((aligned / count) * 100) + '% · Unaligned ' +
-      Math.round((unaligned / count) * 100) + '%<br>' + formatTimestamp(topic.last_completed_at);
+      Math.round((unaligned / count) * 100) + '%';
   }
 
   function findTopic(data) {
@@ -98,9 +130,7 @@
 
   function applyTopic(topic) {
     if (!topic) {
-      start.href = '/world-vibe/?t=' + encodeURIComponent(topicSlug);
-      start.textContent = 'Open World Vibe';
-      start.removeAttribute('aria-disabled');
+      showDestination('Open World Vibe', '/world-vibe/?t=' + encodeURIComponent(topicSlug), false);
       setStatus('This topic could not be loaded here. Open World Vibe to try again.', true);
       return;
     }
@@ -108,45 +138,86 @@
     renderProgress(topic);
     var route = smartTopicRoute(topic.route_url, topic.prompt_id);
     if (route) {
-      start.href = route;
-      start.textContent = 'Start your check-in';
-      start.removeAttribute('aria-disabled');
-      start.dataset.routeReady = 'true';
+      showDestination('Open in SomaCheck', route, true);
       setStatus('', false);
       return;
     }
-    start.href = '/world-vibe/?t=' + encodeURIComponent(topicSlug);
-    start.textContent = 'Open World Vibe';
-    start.removeAttribute('aria-disabled');
+    showDestination('Open World Vibe', '/world-vibe/?t=' + encodeURIComponent(topicSlug), false);
     setStatus('Open World Vibe to prepare this check-in.', false);
   }
 
+  function prepareTopicLoad() {
+    showStartButton('Preparing SomaCheck...', 'loading', true);
+    setStatus('', false);
+  }
+
+  function showRetry(message) {
+    activePromptId = null;
+    showStartButton('Retry handoff', 'retry', false);
+    setStatus(message, true);
+  }
+
   function loadTopic() {
-    return fetch(API_BASE + '/v1/public/world-vibe/topics', { method: 'GET' })
+    var attempt = ++loadAttempt;
+    if (loadController) loadController.abort();
+    var controller = typeof AbortController === 'function' ? new AbortController() : null;
+    loadController = controller;
+    prepareTopicLoad();
+    var timeoutId = window.setTimeout(function() {
+      if (controller && attempt === loadAttempt) controller.abort();
+    }, TOPICS_TIMEOUT_MS);
+    var options = { method: 'GET' };
+    if (controller) options.signal = controller.signal;
+    return fetch(API_BASE + '/v1/public/world-vibe/topics', options)
       .then(function(response) {
         if (!response.ok) throw new Error('topics-unavailable');
         return response.json();
       })
-      .then(function(data) { applyTopic(findTopic(data)); })
-      .catch(function() { applyTopic(null); });
+      .then(function(data) {
+        if (attempt === loadAttempt) applyTopic(findTopic(data));
+      })
+      .catch(function(error) {
+        if (attempt !== loadAttempt) return;
+        if (error && error.name === 'AbortError') {
+          showRetry('This is taking longer than expected. Retry when you are ready.');
+          return;
+        }
+        showRetry('SomaCheck could not be prepared. Check your connection and retry.');
+      })
+      .finally(function() { window.clearTimeout(timeoutId); });
   }
 
   function refreshProgress() {
-    if (!activePromptId || document.hidden) return;
-    fetch(API_BASE + '/v1/public/world-vibe/topics/' + encodeURIComponent(topicSlug) + '/progress', { method: 'GET' })
+    if (!activePromptId || document.hidden) return Promise.resolve(true);
+    return fetch(API_BASE + '/v1/public/world-vibe/topics/' + encodeURIComponent(topicSlug) + '/progress', { method: 'GET' })
       .then(function(response) {
         if (!response.ok) throw new Error('progress-unavailable');
         return response.json();
       })
       .then(function(topic) {
         if (topic.topic_slug === topicSlug && topic.prompt_id === activePromptId) renderProgress(topic);
+        return true;
       })
-      .catch(function() {});
+      .catch(function() { return false; });
   }
 
-  start.addEventListener('click', function(event) {
-    if (!start.href) event.preventDefault();
-  });
+  function jitteredDelay(base) {
+    return Math.round(base * (1 - PROGRESS_JITTER + (Math.random() * PROGRESS_JITTER * 2)));
+  }
+
+  function scheduleProgressRefresh() {
+    if (progressTimer) window.clearTimeout(progressTimer);
+    progressTimer = null;
+    if (!activePromptId || document.hidden) return;
+    var backoff = Math.min(PROGRESS_MAX_MS, PROGRESS_BASE_MS * Math.pow(2, progressFailures));
+    progressTimer = window.setTimeout(function() {
+      progressTimer = null;
+      refreshProgress().then(function(succeeded) {
+        progressFailures = succeeded ? 0 : Math.min(progressFailures + 1, 4);
+        scheduleProgressRefresh();
+      });
+    }, jitteredDelay(backoff));
+  }
 
   share.addEventListener('click', function() {
     var text = "World Vibe: '" + expectedStatement + "'. Open it in SomaCheck: " + stableUrl;
@@ -160,7 +231,14 @@
     }
   });
 
-  loadTopic().then(function() {
-    window.setInterval(refreshProgress, 7000);
+  document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+      if (progressTimer) window.clearTimeout(progressTimer);
+      progressTimer = null;
+      return;
+    }
+    scheduleProgressRefresh();
   });
+
+  loadTopic().then(scheduleProgressRefresh);
 })();

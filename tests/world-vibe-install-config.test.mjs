@@ -115,7 +115,7 @@ try {
   // 1. Default config: the portal's rendered install CTA seam must equal the value in config.js.
   const portalPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await portalPage.goto(`${origin}/world-vibe/`, { waitUntil: 'networkidle' });
-  await portalPage.locator('.route-note').first().waitFor();
+  await portalPage.locator('.route-note').first().waitFor({ state: 'attached' });
   const defaultAttr = await portalPage.locator('.route-note').first().getAttribute('data-install-url');
   assert.equal(defaultAttr, defaultInstallUrl, 'portal install CTA seam must equal world-vibe/config.js by default');
   await portalPage.close();
@@ -136,7 +136,7 @@ try {
 
   const swappedPortalPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await swappedPortalPage.goto(`${origin}/world-vibe/`, { waitUntil: 'networkidle' });
-  await swappedPortalPage.locator('.route-note').first().waitFor();
+  await swappedPortalPage.locator('.route-note').first().waitFor({ state: 'attached' });
   const swappedAttr = await swappedPortalPage.locator('.route-note').first().getAttribute('data-install-url');
   assert.equal(swappedAttr, swappedInstallUrl, 'portal install CTA seam must follow a one-line config.js swap');
   await swappedPortalPage.close();

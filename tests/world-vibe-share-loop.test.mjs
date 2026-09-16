@@ -26,7 +26,10 @@ assert.match(source, /session_nonce/, 'join flow must send session_nonce');
 assert.match(source, /sessionStorage/, 'session nonce must be scoped to sessionStorage');
 assert.doesNotMatch(source, /localStorage|document\.cookie/, 'session nonce must not use persistent browser tracking storage');
 assert.match(source, /Share this World Vibe/, 'portal must expose the concise share CTA');
-assert.match(source, /setInterval\(function\(\) \{[\s\S]*POLL_MS\);/, 'portal must poll on a 5 to 10 second timer');
+assert.doesNotMatch(source, /setInterval\(/, 'portal must not synchronize venue clients on a fixed interval');
+assert.match(source, /Math\.random\(\)/, 'portal aggregate refresh must include jitter');
+assert.match(source, /POLL_MAX_MS/, 'portal aggregate refresh must use a bounded backoff');
+assert.match(source, /visibilitychange/, 'portal aggregate refresh must pause and resume with page visibility');
 assert.match(source, /route_url/, 'one-tap flow must read the public topic route_url');
 assert.match(source, /window\.location\.assign\(topic\.smartRouteUrl\)/, 'one-tap flow must navigate the current tab to the validated smart route');
 assert.doesNotMatch(source, /window\.open\(|target="_blank"/, 'one-tap flow must not open a new tab or window');
@@ -51,8 +54,7 @@ const installUrl = 'https://testflight.apple.com/join/C4mAH3zz';
 const initialTime = '2026-08-26T13:00:00.000Z';
 const firstRefreshTime = '2026-08-26T13:01:00.000Z';
 const unlockedTime = '2026-08-26T13:03:00.000Z';
-const expectedInitialTimestamp = `Last check-in ${new Date(initialTime).toLocaleString()}`;
-const expectedUnlockedTimestamp = `Last check-in ${new Date(unlockedTime).toLocaleString()}`;
+const expectedActivityStatus = '';
 // A raw stable link_url already on the public web origin is kept without substitution.
 const expectedStableRoute = stableShareRoute(publicShareBase, 'gut-vs-dashboard');
 const expectedPersonalAppRoute = 'somacheck://s/personal-gut-token';
@@ -172,15 +174,15 @@ function withInjectedConfig(html, origin) {
   const injected = [
     `<script>window.SOMACHECK_API_BASE = ${JSON.stringify(`${origin}/api`)};`,
     `window.SOMACHECK_INSTALL_URL = ${JSON.stringify(installUrl)};`,
-    'window.__wvIntervals = [];',
-    'const __wvNativeSetInterval = window.setInterval.bind(window);',
-    'window.setInterval = function(fn, ms) {',
-    '  if (ms === 7000) {',
+    'window.__wvTimeouts = [];',
+    'const __wvNativeSetTimeout = window.setTimeout.bind(window);',
+    'window.setTimeout = function(fn, ms) {',
+    '  if (ms >= 5000) {',
     '    window.__worldVibePoll = fn;',
-    '    window.__wvIntervals.push({ fn: fn, ms: ms });',
+    '    window.__wvTimeouts.push({ fn: fn, ms: ms });',
     '    return 1;',
     '  }',
-    '  return __wvNativeSetInterval(fn, ms);',
+    '  return __wvNativeSetTimeout(fn, ms);',
     '};',
     '</script>'
   ].join('');
@@ -390,9 +392,9 @@ async function runChallengeRequiredProof(browser) {
   const joinStart = joinRequests.length;
   const requestStart = requestLog.length;
   const challengeServer = await startPortalServer({
-    joinStatus: 403,
+    joinStatus: 429,
     joinResponse: function() {
-      return { error: 'challenge_required' };
+      return { error: 'challenge_required', retry_after_seconds: 45 };
     }
   });
   const origin = `http://127.0.0.1:${challengeServer.address().port}`;
@@ -406,7 +408,7 @@ async function runChallengeRequiredProof(browser) {
     await page.locator('#topic-gut-vs-dashboard .answer-btn').click();
     await page.waitForFunction(function() {
       var statusEl = document.querySelector('#topic-gut-vs-dashboard [data-role="status"]');
-      return statusEl && statusEl.textContent === 'This check-in could not be opened right now. Please try again later.';
+      return statusEl && statusEl.textContent === 'This World Vibe is busy. Try again in about 45 seconds.';
     });
     await page.waitForTimeout(350);
 
@@ -414,16 +416,15 @@ async function runChallengeRequiredProof(browser) {
     const requestDelta = requestLog.slice(requestStart).filter(function(entry) {
       return entry.pathname.endsWith('/join');
     }).length;
-    assert.equal(joinDelta, 1, 'challenge_required must trigger exactly one join attempt');
-    assert.equal(requestDelta, 1, 'challenge_required must not be retried automatically');
-    assert.deepEqual(track.navigations.slice(navigationsBefore), [], 'challenge_required must not navigate anywhere');
-    assert.deepEqual(track.scriptNavigations, [], 'challenge_required must not start any script navigation');
-    assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').evaluate(function(node) { return node.tagName; }), 'BUTTON', 'challenge_required must fail closed without issuing a statement link');
-    assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').textContent(), 'Start your check-in', 'challenge_required must preserve the explicit join action');
-    assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').isDisabled(), false, 'challenge_required should allow a later manual retry');
-    assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="status"]').textContent(), 'This check-in could not be opened right now. Please try again later.', 'challenge_required must surface its own fail-closed copy');
-    assert.notEqual(await page.locator('#topic-gut-vs-dashboard [data-role="status"]').textContent(), 'the world is busy today, come back tomorrow', 'challenge_required copy must stay distinct from the 429 quota path');
-    assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="qr"]').getAttribute('data-payload'), expectedStableRoute, 'challenge_required must not replace the stable topic route');
+    assert.equal(joinDelta, 1, 'legacy challenge response must trigger exactly one join attempt');
+    assert.equal(requestDelta, 1, 'legacy challenge response must not be retried automatically');
+    assert.deepEqual(track.navigations.slice(navigationsBefore), [], 'legacy challenge response must not navigate anywhere');
+    assert.deepEqual(track.scriptNavigations, [], 'legacy challenge response must not start any script navigation');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').evaluate(function(node) { return node.tagName; }), 'BUTTON', 'legacy challenge response must fail closed without issuing a statement link');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').textContent(), 'Open in SomaCheck', 'legacy challenge response must preserve the explicit app handoff action');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').isDisabled(), false, 'legacy challenge response should allow a later manual retry');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="status"]').textContent(), 'This World Vibe is busy. Try again in about 45 seconds.', 'legacy challenge response must collapse to the retryable busy state');
+    assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="qr"]').getAttribute('data-payload'), expectedStableRoute, 'legacy challenge response must not replace the stable topic route');
     return { recognized: true, joinDelta: joinDelta, requestDelta: requestDelta };
   } finally {
     await page.close();
@@ -566,7 +567,7 @@ async function runSmartRouteProof(browser) {
     await page.locator('#topic-gut-vs-dashboard').waitFor({ state: 'visible' });
     const button = page.locator('#topic-gut-vs-dashboard .answer-btn');
     assert.equal(await button.evaluate((node) => node.tagName), 'BUTTON', 'smart route must not pre-render a personal link on load');
-    assert.equal(await button.textContent(), 'Start your check-in', 'smart route keeps the explicit CTA');
+    assert.equal(await button.textContent(), 'Open in SomaCheck', 'smart route keeps the explicit app handoff CTA');
     assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="status"]').textContent(), '', 'smart route must not claim any personal status before the tap');
     assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role="qr"]').getAttribute('data-payload'), expectedStable, 'QR must be the current-origin stable topic route even when a smart route_url exists');
     assert.equal(await page.locator('#topic-ai-at-work [data-role="qr"]').getAttribute('data-payload'), stableShareRoute(origin, 'ai-at-work'), 'a topic with only route_url must still derive the current-origin stable share route for its QR');
@@ -574,6 +575,9 @@ async function runSmartRouteProof(browser) {
     assert.equal(await page.locator('#topic-ai-at-work .route-note').getAttribute('data-install-url'), installUrl, 'install fallback seam must be unchanged on the smart path');
     assert.match(await page.locator('#topic-gut-vs-dashboard .privacy-line').textContent(), /limited routing data may be used/i, 'privacy disclosure must remain on the smart path');
     assert.match(await page.locator('#topic-gut-vs-dashboard [data-role="aggregate"]').textContent(), /1 of 5/, 'locked aggregate must render on the smart path');
+    const initialPollDelays = await page.evaluate(() => window.__wvTimeouts.map((timer) => timer.ms));
+    assert.equal(initialPollDelays.length, 1, 'portal must schedule one aggregate refresh after initialization');
+    assert.ok(initialPollDelays[0] >= 5250 && initialPollDelays[0] <= 8750, 'initial aggregate refresh must jitter around seven seconds');
 
     await page.locator('#topic-gut-vs-dashboard .share-btn').click();
     const shared = await page.evaluate(() => window.__wvShared);
@@ -585,6 +589,9 @@ async function runSmartRouteProof(browser) {
     // Passive activity: poll, scroll, refresh. None of it may join or navigate.
     await page.evaluate(() => window.__worldVibePoll());
     await page.waitForFunction(() => document.querySelector('#topic-gut-vs-dashboard [data-role="aggregate"]').textContent.includes('3 of 5'));
+    await page.waitForFunction(() => window.__wvTimeouts.length >= 2);
+    const latestPollDelay = await page.evaluate(() => window.__wvTimeouts.at(-1).ms);
+    assert.ok(latestPollDelay >= 5250 && latestPollDelay <= 8750, 'a successful refresh must reset to the jittered base interval');
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await page.mouse.wheel(0, 400);
     await page.waitForTimeout(250);
@@ -743,8 +750,8 @@ async function runFallbackStatusProof(browser) {
   progressHits.clear();
   const cases = {
     'wv-created-201': { status: 201, body: { statement_id: 'stmt_201', link_url: 'https://go.somacheck.com/s/personal-201', app_url: 'somacheck://s/personal-201' }, expectStatus: 'Your check-in is ready in SomaCheck.', link: true },
-    'wv-challenge-200': { status: 200, body: { error: 'challenge_required' }, expectStatus: 'This check-in could not be opened right now. Please try again later.' },
-    'wv-rate-limit-429': { status: 429, body: { error: 'rate_limited' }, expectStatus: 'the world is busy today, come back tomorrow' },
+    'wv-challenge-200': { status: 200, body: { error: 'challenge_required', retry_after_seconds: 30 }, expectStatus: 'This World Vibe is busy. Try again in about 30 seconds.' },
+    'wv-rate-limit-429': { status: 429, body: { error: 'rate_limit_exceeded', retry_after_seconds: 45 }, expectStatus: 'This World Vibe is busy. Try again in about 45 seconds.' },
     'wv-retired-404': { status: 404, body: { error: 'not_found' }, expectStatus: 'This topic has been retired.' },
     'wv-server-500': { status: 500, body: { error: 'internal' }, expectStatus: 'Something went wrong. Please try again.' },
     'wv-malformed-200': { status: 200, raw: 'not-json{', expectStatus: 'Something went wrong. Please try again.' },
@@ -796,7 +803,7 @@ async function runFallbackStatusProof(browser) {
         assert.equal(await control.getAttribute('href'), spec.body.app_url, `${slug}: manual link must carry the returned personal route`);
       } else {
         assert.equal(await control.evaluate((node) => node.tagName), 'BUTTON', `${slug}: failure must not fabricate a personal link`);
-        assert.equal(await control.textContent(), 'Start your check-in', `${slug}: failure keeps the explicit CTA`);
+        assert.equal(await control.textContent(), 'Open in SomaCheck', `${slug}: failure keeps the explicit app handoff CTA`);
         assert.equal(await control.isDisabled(), false, `${slug}: failure leaves a manual retry available`);
       }
       outcomes[slug] = { joins: attempts, navigations: track.navigations.length - navigationsBefore, status: spec.expectStatus };
@@ -907,8 +914,9 @@ try {
   assert.equal(await routeNote.getAttribute('data-install-url'), installUrl, 'route seam must carry the configured current public fallback target');
   assert.match(await page.locator('#topic-gut-vs-dashboard .privacy-line').textContent(), /limited routing data may be used/i, 'privacy disclosure must describe the install-return behavior');
   assert.equal(await page.locator('#topic-gut-vs-dashboard .share-btn').textContent(), 'Share this World Vibe', 'share CTA label must stay concise');
-  assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').textContent(), 'Start your check-in', 'join CTA must stay explicit');
-  assert.equal(await page.locator('#last-updated').textContent(), expectedInitialTimestamp, 'timestamp must use the last actual completion time, not fetch time');
+  assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').textContent(), 'Open in SomaCheck', 'join CTA must name the app handoff');
+  assert.equal(await page.locator('#last-updated').textContent(), expectedActivityStatus, 'public activity status must not expose a precise participant timestamp');
+  assert.doesNotMatch(await aggregate.textContent(), /Last check-in|\d{1,2}:\d{2}/, 'small-cohort progress must not expose precise participant timing');
   assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role=\"status\"]').textContent(), '', 'initial state must not claim a personal status');
   assert.equal(await page.locator('#topic-gut-vs-dashboard [data-role=\"receipt\"]').count(), 0, 'public web must not render an owner receipt area');
 
@@ -957,7 +965,7 @@ try {
   assert.match(unlockedAggregate, /Unaligned/i, 'split must show both sides after unlock');
   assert.match(unlockedAggregate, /60%/, 'aligned count must normalize from the frozen aligned field');
   assert.match(unlockedAggregate, /40%/, 'unaligned count must normalize from the frozen unaligned field');
-  assert.equal(await page.locator('#last-updated').textContent(), expectedUnlockedTimestamp, 'later refreshes must move to the newest actual completion time');
+  assert.equal(await page.locator('#last-updated').textContent(), expectedActivityStatus, 'later refreshes must retain the coarse public activity status');
   assert.equal(await qr.getAttribute('data-payload'), expectedStableRoute, 'stable route must survive multiple refresh cycles');
   assert.equal(await qr.getAttribute('data-marker'), 'kept', 'second refresh must still avoid replacing the QR node');
   assert.equal(await page.locator('#topic-gut-vs-dashboard .answer-btn').getAttribute('href'), expectedPersonalAppRoute, 'personal route must still be available after unlock');
@@ -976,7 +984,7 @@ try {
     secondJoinBody: joinBodies[1],
     stableRoute: expectedStableRoute,
     derivedStableRoute: smartRouteProof.stableRoute,
-    lastActualCompletion: expectedUnlockedTimestamp,
+    publicActivityStatus: expectedActivityStatus,
     fixtureFallback,
     challengeRequired,
     mutationProof,
