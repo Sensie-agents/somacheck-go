@@ -84,7 +84,7 @@
   function getClientNonce() { return persistentValue(CLIENT_NONCE_KEY, window.localStorage); }
   function getClientSession() { return persistentValue(CLIENT_SESSION_KEY, window.sessionStorage); }
 
-  function shareUrlFor(slug) { return '/world-vibe/share/' + encodeURIComponent(slug); }
+  function shareUrlFor(slug) { return '/world-vibe/share/?item=' + encodeURIComponent(slug); }
 
   function progressHtml(item) {
     var count = Number(item.contributor_count);

@@ -1,7 +1,7 @@
 // World Vibe content-item share page (Lane H, 2026-09-17).
 //
 // Serves any content-item slug at /world-vibe/share/<slug> via the
-// Cloudflare Pages `_redirects` rewrite to /world-vibe/share/_item/index.html
+// Served directly at /world-vibe/share/?item=<slug>; no rewrite rule needed.
 // (200, so the URL bar and the slug this script reads stay the original one).
 // The three curated topic pages are untouched static folders and keep
 // resolving before this rewrite ever applies.
@@ -56,8 +56,15 @@
   }
 
   function slugFromPath() {
+    // Primary form: /world-vibe/share/?item=<slug>, which needs no rewrite rule.
+    // Also accepts /world-vibe/share/<slug> if a rewrite is ever configured.
+    try {
+      var q = new URLSearchParams(window.location.search).get('item');
+      if (q) return q;
+    } catch (err) { /* older browsers fall through to the path form */ }
     var parts = window.location.pathname.split('/').filter(Boolean);
-    return parts.length ? decodeURIComponent(parts[parts.length - 1]) : '';
+    var last = parts.length ? decodeURIComponent(parts[parts.length - 1]) : '';
+    return last === 'share' ? '' : last;
   }
 
   function setStatus(message, isError) {
