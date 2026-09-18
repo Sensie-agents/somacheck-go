@@ -1,0 +1,6 @@
+# World Vibe content-item share pages: the three curated topics are static
+# folders (world-vibe/share/<topic>/index.html) and are served as those exact
+# assets before any redirect rule is evaluated, so they keep working
+# unchanged. Every other /world-vibe/share/<slug> falls through to this
+# rewrite, which resolves the slug against the live feed client-side.
+/world-vibe/share/*  /world-vibe/share/_item/index.html  200

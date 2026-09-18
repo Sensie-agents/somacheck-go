@@ -1,0 +1,216 @@
+// World Vibe content-item share page (Lane H, 2026-09-17).
+//
+// Serves any content-item slug at /world-vibe/share/<slug> via the
+// Cloudflare Pages `_redirects` rewrite to /world-vibe/share/_item/index.html
+// (200, so the URL bar and the slug this script reads stay the original one).
+// The three curated topic pages are untouched static folders and keep
+// resolving before this rewrite ever applies.
+//
+// Flow: read the slug from the path, look it up in the public feed (there is
+// no per-slug read endpoint for content items, only the topics one), render
+// the quote/statement/source/progress, and only on an explicit tap call
+// POST {API_BASE}/v1/public/world-vibe/items/{slug}/join and navigate to the
+// returned link_url (a signed /s/<token> statement link). No statement is
+// ever issued before that tap. The feed only ever contains live items, so an
+// item that cannot be found there is treated as not available.
+(function () {
+  'use strict';
+
+  var API_BASE = window.SOMACHECK_API_BASE || 'https://pbldcmniommltbdwuykk.supabase.co/functions/v1/statement-api';
+  var FEED_PAGE_SIZE = 50;
+  // Safety cap while walking the paginated public feed looking for one slug
+  // (there is no server-side filter by slug). 20 pages of 50 covers 1000 live
+  // items; beyond that the item is treated as not found rather than hanging
+  // the page on an unbounded fetch loop.
+  var MAX_FEED_PAGES = 20;
+  var SESSION_NONCE_KEY = 'world-vibe-item-join-session';
+
+  var els = {};
+  var currentItem = null;
+  // Generated once per page load and reused if the tap is retried, so a
+  // retry replays the same statement instead of minting a new one.
+  var joinNonce = null;
+
+  function escapeHtml(str) {
+    return String(str === null || str === undefined ? '' : str).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function createNonce() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+    return 'wv-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+  }
+
+  function getSessionNonce() {
+    try {
+      var value = window.sessionStorage.getItem(SESSION_NONCE_KEY);
+      if (!value) {
+        value = createNonce();
+        window.sessionStorage.setItem(SESSION_NONCE_KEY, value);
+      }
+      return value;
+    } catch (error) {
+      return createNonce();
+    }
+  }
+
+  function slugFromPath() {
+    var parts = window.location.pathname.split('/').filter(Boolean);
+    return parts.length ? decodeURIComponent(parts[parts.length - 1]) : '';
+  }
+
+  function setStatus(message, isError) {
+    els.status.textContent = message || '';
+    els.status.className = 'status' + (isError ? ' error' : '');
+  }
+
+  function progressHtml(item) {
+    var count = Number(item.contributor_count);
+    if (!isFinite(count) || count < 0) count = 0;
+    var threshold = Number(item.unlock_threshold) || 3;
+    var unlocked = item.aligned !== null && item.aligned !== undefined &&
+      item.unaligned !== null && item.unaligned !== undefined;
+
+    if (!unlocked) {
+      return '<strong>' + count + ' of ' + threshold + '</strong>Results appear after ' + threshold + ' people join.';
+    }
+
+    var aligned = Number(item.aligned) || 0;
+    var unaligned = Number(item.unaligned) || 0;
+    var total = aligned + unaligned;
+    var alignedPct = total ? Math.round((aligned / total) * 100) : 0;
+    var unalignedPct = total ? Math.max(0, 100 - alignedPct) : 0;
+    return (
+      '<div class="aggregate-label">What participants noticed</div>' +
+      '<div class="split">' +
+        '<div class="split-row"><span>Aligned</span><strong>' + alignedPct + '%</strong></div>' +
+        '<div class="split-row"><span>Unaligned</span><strong>' + unalignedPct + '%</strong></div>' +
+      '</div>' +
+      count + ' checked in'
+    );
+  }
+
+  function renderItem(item) {
+    els.quote.textContent = item.quote || '';
+    els.statement.textContent = item.statement || '';
+    els.progress.innerHTML = progressHtml(item);
+    if (item.source_url) {
+      els.sourceLink.href = item.source_url;
+      els.sourceLink.textContent = item.domain || item.source_url;
+      els.sourceLine.hidden = false;
+    } else {
+      els.sourceLine.hidden = true;
+    }
+    els.start.hidden = false;
+    els.start.disabled = false;
+    document.title = 'World Vibe: ' + (item.statement || 'SomaCheck');
+    setStatus('', false);
+  }
+
+  function renderUnavailable() {
+    els.quote.textContent = 'This item is not available.';
+    els.statement.textContent = '';
+    els.progress.innerHTML = '';
+    els.sourceLine.hidden = true;
+    els.start.hidden = true;
+    setStatus('This item could not be found. It may have been removed or is still awaiting review.', true);
+  }
+
+  function findItemBySlug(slug, cursor, pagesChecked) {
+    var url = API_BASE + '/v1/public/world-vibe/feed?limit=' + FEED_PAGE_SIZE +
+      (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error('feed-unavailable-' + r.status);
+      return r.json();
+    }).then(function (data) {
+      var items = Array.isArray(data.items) ? data.items : [];
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].slug === slug) return items[i];
+      }
+      var nextCursor = data.next_cursor || null;
+      if (nextCursor && pagesChecked + 1 < MAX_FEED_PAGES) {
+        return findItemBySlug(slug, nextCursor, pagesChecked + 1);
+      }
+      return null;
+    });
+  }
+
+  function onStartClick() {
+    if (!currentItem || els.start.disabled) return;
+    els.start.disabled = true;
+    setStatus('Preparing your check-in...', false);
+    if (!joinNonce) joinNonce = createNonce();
+
+    fetch(API_BASE + '/v1/public/world-vibe/items/' + encodeURIComponent(currentItem.slug) + '/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_nonce: joinNonce, session_nonce: getSessionNonce() })
+    }).then(function (r) {
+      return r.text().then(function (text) {
+        var data = null;
+        try { data = text ? JSON.parse(text) : null; } catch (error) { data = null; }
+
+        if (r.status === 404) {
+          setStatus('This item is no longer available.', true);
+          els.start.disabled = false;
+          return;
+        }
+        if (r.status === 429) {
+          setStatus('the world is busy today, come back tomorrow', false);
+          els.start.disabled = false;
+          return;
+        }
+        if (!r.ok || !data || !data.link_url) {
+          setStatus('Something went wrong. Please try again.', true);
+          els.start.disabled = false;
+          return;
+        }
+
+        setStatus('Your check-in is ready in SomaCheck.', false);
+        window.location.href = data.link_url;
+      });
+    }).catch(function (err) {
+      setStatus('Something went wrong. Please try again.', true);
+      els.start.disabled = false;
+      console.error('world-vibe item join error:', err);
+    });
+  }
+
+  function init() {
+    els.quote = document.getElementById('item-quote');
+    els.statement = document.getElementById('item-statement');
+    els.progress = document.getElementById('progress');
+    els.sourceLine = document.getElementById('source-line');
+    els.sourceLink = document.getElementById('source-link');
+    els.start = document.getElementById('start-check-in');
+    els.status = document.getElementById('status');
+    if (!els.start) return;
+
+    els.start.addEventListener('click', onStartClick);
+
+    var slug = slugFromPath();
+    if (!slug) {
+      renderUnavailable();
+      return;
+    }
+
+    findItemBySlug(slug, null, 0).then(function (item) {
+      if (!item) {
+        renderUnavailable();
+        return;
+      }
+      currentItem = item;
+      renderItem(item);
+    }).catch(function (err) {
+      renderUnavailable();
+      console.error('world-vibe item load error:', err);
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();

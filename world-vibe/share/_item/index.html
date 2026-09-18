@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>World Vibe - SomaCheck</title>
+  <meta name="description" content="Check in on this World Vibe item with the 3-second wrist check in SomaCheck.">
+  <meta property="og:title" content="World Vibe - SomaCheck">
+  <meta property="og:description" content="Check in on this World Vibe item with the 3-second wrist check in SomaCheck.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="stylesheet" href="/world-vibe/share/topic.css">
+  <style>
+    .source-line { color: var(--faint); font-size: .92rem; margin: 0 0 18px; }
+    .source-line a { color: var(--emerald-text); }
+    .aggregate-label { color: var(--muted); font-size: .85rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 10px; }
+    .split { display: grid; gap: 10px; margin-bottom: 10px; }
+    .split-row { display: flex; justify-content: space-between; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; }
+    .split-row strong { color: var(--ink); }
+    /* topic.css's .button sets its own display, which otherwise beats the
+       browser's default [hidden] styling at equal selector specificity. */
+    .button[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand">SomaCheck</div>
+    <h1>World Vibe</h1>
+    <blockquote id="item-quote">Loading this item...</blockquote>
+    <p id="item-statement" class="qr-caption"></p>
+    <div class="progress" id="progress" aria-live="polite"></div>
+    <p class="source-line" id="source-line" hidden>Source: <a id="source-link" href="#" target="_blank" rel="noopener noreferrer"></a></p>
+    <div class="actions">
+      <button class="button button-primary" id="start-check-in" type="button" hidden>Check in on your phone</button>
+    </div>
+    <p class="status" id="status" aria-live="polite">Loading...</p>
+    <p class="privacy">Your identity is not shown. Results appear only in aggregate.</p>
+    <p class="footer"><a href="/world-vibe/">Explore World Vibe</a> · <a href="/privacy">Privacy</a></p>
+  </main>
+  <script src="/world-vibe/config.js"></script>
+  <script src="/world-vibe/share/item.js" defer></script>
+</body>
+</html>
