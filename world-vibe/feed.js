@@ -1,8 +1,8 @@
-// World Vibe live feed (Lane E, 2026-09-17).
+// World Vibe live feed (Lane E, 2026-09-17; ranking added at Lane I, 2026-09-18).
 //
-// Renders GET {statementApiBase}/v1/public/world-vibe/feed?cursor= as cards,
-// newest first, polling every 30 seconds and merging without a full
-// re-render so scroll position is not disturbed. Each card exposes:
+// Renders GET {statementApiBase}/v1/public/world-vibe/feed?order=&limit= as
+// cards, polling every 30 seconds and merging without a full re-render so
+// scroll position is not disturbed. Each card exposes:
 //   - the quote and the statement
 //   - "X of Y checked in" until the API returns an aggregate split, which it
 //     only does at or above the unlock threshold
@@ -11,6 +11,14 @@
 //     the curated topic cards already do
 //   - a Report control that posts to
 //     /v1/public/world-vibe/items/{slug}/report
+//
+// Ranked (order=ranked) is the default: it orders by completed check-ins,
+// the same count a card already shows as "X of Y checked in" -- a pending
+// ask never moves a card. Newest (order=recent) stays one tap away. A poll
+// can change an item's rank as well as its progress, so every poll
+// reconciles the DOM order to match the API's order, moving existing card
+// elements rather than rebuilding them, so scroll position survives a card
+// moving up or down same as it survives one being added or removed.
 //
 // This module also owns the Feed / Topics tab switch. The Topics tab keeps
 // its existing markup and script (the inline script at the bottom of
@@ -22,6 +30,11 @@
     'https://pbldcmniommltbdwuykk.supabase.co/functions/v1/statement-api';
   var FEED_POLL_MS = 30000;
   var FEED_PAGE_SIZE = 30;
+  var DEFAULT_ORDER = 'ranked';
+  var ORDER_NOTES = {
+    ranked: 'Ordered by completed check-ins.',
+    recent: 'Ordered by newest activity.'
+  };
   // Persists across sessions so a repeat report from the same browser dedupes
   // server-side (the RPC hashes this; nothing readable is ever sent).
   var CLIENT_NONCE_KEY = 'world-vibe-report-nonce';
@@ -42,6 +55,7 @@
   var els = {};
   var itemsBySlug = {};
   var loaded = false;
+  var currentOrder = DEFAULT_ORDER;
 
   function escapeHtml(str) {
     return String(str === null || str === undefined ? '' : str).replace(/[&<>"']/g, function (c) {
@@ -221,11 +235,24 @@
     els.list.innerHTML = '<div class="error">The feed could not be loaded. Please try again later.</div>';
   }
 
+  // Moves existing card elements into the exact order the API returned,
+  // without recreating any of them, so bound listeners and any open report
+  // panel survive. A rank change (a count rising) or a newest-first bump is
+  // reflected the same way an addition or removal already was: no full
+  // re-render, so scroll position is not disturbed.
+  function reorderList(items) {
+    items.forEach(function (item) {
+      var el = document.getElementById('feed-item-' + item.slug);
+      if (el) els.list.appendChild(el);
+    });
+  }
+
   // Reconciles the DOM against the newest page of items: updates cards that
-  // are still present, prepends genuinely new ones above everything else,
-  // and drops cards that fell out of the page (moderation, or pushed off by
-  // newer activity). Existing cards are mutated in place rather than the
-  // list being rebuilt, so a reader partway down the feed keeps their place.
+  // are still present, builds genuinely new ones, drops cards that fell out
+  // of the page (moderation, or pushed off by newer activity), then
+  // reorders everything to match the API's order. Existing cards are
+  // mutated and moved in place rather than the list being rebuilt, so a
+  // reader partway down the feed keeps their place.
   function mergeItems(items) {
     if (!loaded) {
       els.list.innerHTML = '';
@@ -243,14 +270,14 @@
     }
 
     var seen = {};
-    var newOnes = [];
     items.forEach(function (item) {
       seen[item.slug] = true;
       if (itemsBySlug[item.slug]) {
         itemsBySlug[item.slug] = item;
         updateCard(item);
       } else {
-        newOnes.push(item);
+        itemsBySlug[item.slug] = item;
+        els.list.appendChild(buildCard(item));
       }
     });
 
@@ -263,24 +290,27 @@
       if (el && el.parentNode) el.parentNode.removeChild(el);
     });
 
-    if (Object.keys(itemsBySlug).length === 0 && newOnes.length === 0) {
+    if (items.length === 0) {
       renderEmpty();
       return;
     }
-    if (els.list.querySelector('.empty') && (newOnes.length || Object.keys(itemsBySlug).length)) {
+    if (els.list.querySelector('.empty')) {
       els.list.innerHTML = '';
+      items.forEach(function (item) {
+        els.list.appendChild(buildCard(item));
+      });
+      return;
     }
 
-    // Newest first: insert in reverse so the very newest item ends at top.
-    for (var i = newOnes.length - 1; i >= 0; i--) {
-      var item = newOnes[i];
-      itemsBySlug[item.slug] = item;
-      els.list.insertBefore(buildCard(item), els.list.firstChild);
-    }
+    // The API is the source of truth for order (ranked or recent): move
+    // every card into that exact sequence rather than trusting arrival order.
+    reorderList(items);
   }
 
   function loadFeed() {
-    return fetch(STATEMENT_API_URL + '/v1/public/world-vibe/feed?limit=' + FEED_PAGE_SIZE)
+    return fetch(
+      STATEMENT_API_URL + '/v1/public/world-vibe/feed?order=' + currentOrder + '&limit=' + FEED_PAGE_SIZE
+    )
       .then(function (r) {
         if (!r.ok) throw new Error('feed-unavailable-' + r.status);
         return r.json();
@@ -298,6 +328,35 @@
   function pollFeed() {
     if (document.visibilityState === 'hidden') return;
     loadFeed();
+  }
+
+  // Switching order is a deliberate navigation, not a poll: the page starts
+  // a fresh first page and renders it from scratch, same as the very first
+  // load. A poll keeps reconciling in place; only this jumps to page one.
+  function setOrder(order) {
+    if (order !== 'ranked' && order !== 'recent') return;
+    if (order === currentOrder) return;
+    currentOrder = order;
+    if (els.orderButtons) {
+      els.orderButtons.forEach(function (btn) {
+        var active = btn.dataset.order === order;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+    }
+    if (els.orderNote) els.orderNote.textContent = ORDER_NOTES[order] || '';
+    loaded = false;
+    itemsBySlug = {};
+    loadFeed();
+  }
+
+  function initOrderControl() {
+    els.orderButtons = Array.prototype.slice.call(document.querySelectorAll('.order-btn'));
+    els.orderNote = document.getElementById('feed-order-note');
+    if (els.orderNote) els.orderNote.textContent = ORDER_NOTES[currentOrder] || '';
+    els.orderButtons.forEach(function (btn) {
+      btn.addEventListener('click', function () { setOrder(btn.dataset.order); });
+    });
   }
 
   function initTabs() {
@@ -322,6 +381,7 @@
     initTabs();
     els.list = document.getElementById('feed-list');
     if (!els.list) return;
+    initOrderControl();
     loadFeed();
     setInterval(pollFeed, FEED_POLL_MS);
   }

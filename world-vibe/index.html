@@ -196,6 +196,15 @@
     .tab-btn.active { background: var(--emerald); color: #fff; border-color: var(--emerald); }
     .tab-panel { display: none; }
     .tab-panel.active { display: block; }
+    .feed-order-row { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 24px; }
+    .feed-order { display: flex; gap: 8px; }
+    .order-btn {
+      background: transparent; border: 1px solid var(--border); color: var(--muted);
+      font-family: var(--font-body); font-weight: 700; font-size: 13px;
+      padding: 8px 18px; border-radius: 999px; cursor: pointer; transition: background .15s, color .15s;
+    }
+    .order-btn.active { background: var(--emerald-soft); color: var(--emerald-text); border-color: var(--emerald); }
+    .feed-order-note { color: var(--faint); font-size: .85rem; }
     .feed-card .quote { font-size: 1.05rem; font-style: italic; color: var(--ink); margin-bottom: 10px; }
     .feed-card .source-line { color: var(--muted); font-size: .92rem; margin: 16px 0; }
     .report-panel { margin-top: 14px; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg); display: grid; gap: 10px; }
@@ -237,6 +246,14 @@
           <li>Before 3 people join, a card shows only progress.</li>
           <li>At 3 people, the split appears here for everyone.</li>
         </ol>
+      </div>
+
+      <div class="feed-order-row">
+        <div class="feed-order" role="group" aria-label="Feed order">
+          <button type="button" class="order-btn active" data-order="ranked" aria-pressed="true">Ranked</button>
+          <button type="button" class="order-btn" data-order="recent" aria-pressed="false">Newest</button>
+        </div>
+        <p class="feed-order-note" id="feed-order-note">Ordered by completed check-ins.</p>
       </div>
 
       <div id="feed-list" class="topics" aria-live="polite">
