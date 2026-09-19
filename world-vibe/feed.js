@@ -1,11 +1,18 @@
-// World Vibe live feed (Lane E, 2026-09-17; ranking added at Lane I, 2026-09-18).
+// World Vibe live feed (Lane E, 2026-09-17; ranking added at Lane I, 2026-09-18;
+// lean phase added at Lane I, 2026-09-19).
 //
 // Renders GET {statementApiBase}/v1/public/world-vibe/feed?order=&limit= as
 // cards, polling every 30 seconds and merging without a full re-render so
 // scroll position is not disturbed. Each card exposes:
 //   - the quote and the statement
-//   - "X of Y checked in" until the API returns an aggregate split, which it
-//     only does at or above the unlock threshold
+//   - "X of Y checked in" until the API returns a lean, which it only does
+//     at or above the unlock threshold; from there to 9 completed check-ins
+//     the card shows only a plain-language lean (Leans aligned / Leans
+//     unaligned / Mixed) with a one-line note that it is a direction, not a
+//     count; the exact split still appears once the API returns it, at 10
+//     completed check-ins (privacy fix, Mike 2026-09-19: closes the hole
+//     where a creator sharing with exactly two friends could infer both
+//     friends' individual readings from a 3-0 or 1-2 split)
 //   - the source (site name) linking back to the exact original page
 //   - "Check in on your phone", which opens the item's share link exactly as
 //     the curated topic cards already do
@@ -41,6 +48,15 @@
   // Per-tab session id. A fresh one each session is fine: the nonce above is
   // what dedupes a reporter, this is a secondary fingerprint component.
   var CLIENT_SESSION_KEY = 'world-vibe-session-nonce';
+
+  // Plain-language lean labels. Never "aligned: 60%" style wording here: a
+  // lean is a direction, not a count, so nobody reads it as a vote tally.
+  var LEAN_LABELS = {
+    aligned: 'Leans aligned',
+    unaligned: 'Leans unaligned',
+    mixed: 'Mixed'
+  };
+  var LEAN_NOTE = 'A lean shows the general direction so far, not a count.';
 
   var REPORT_REASONS = [
     { value: 'illegal_content', label: 'Illegal content' },
@@ -86,35 +102,50 @@
 
   function shareUrlFor(slug) { return '/world-vibe/share/?item=' + encodeURIComponent(slug); }
 
+  function leanOf(item) {
+    var lean = item.lean;
+    return lean === 'aligned' || lean === 'unaligned' || lean === 'mixed' ? lean : null;
+  }
+
   function progressHtml(item) {
     var count = Number(item.contributor_count);
     if (!isFinite(count) || count < 0) count = 0;
     var threshold = Number(item.unlock_threshold) || 3;
-    var unlocked = item.aligned !== null && item.aligned !== undefined &&
+    var hasExact = item.aligned !== null && item.aligned !== undefined &&
       item.unaligned !== null && item.unaligned !== undefined;
+    var lean = leanOf(item);
 
-    if (!unlocked) {
+    if (hasExact) {
+      var aligned = Number(item.aligned) || 0;
+      var unaligned = Number(item.unaligned) || 0;
+      var total = aligned + unaligned;
+      var alignedPct = total ? Math.round((aligned / total) * 100) : 0;
+      var unalignedPct = total ? Math.max(0, 100 - alignedPct) : 0;
+
       return (
-        '<div class="progress-lock">' +
-          '<div class="value">' + count + ' of ' + threshold + '</div>' +
-          '<div class="label">checked in</div>' +
-        '</div>'
+        '<div class="aggregate-label">What participants noticed</div>' +
+        '<div class="split">' +
+          '<div class="split-row"><span>Aligned</span><strong>' + alignedPct + '%</strong></div>' +
+          '<div class="split-row"><span>Unaligned</span><strong>' + unalignedPct + '%</strong></div>' +
+        '</div>' +
+        '<div class="stat"><span class="value">' + count + '</span><span class="label">checked in</span></div>'
       );
     }
 
-    var aligned = Number(item.aligned) || 0;
-    var unaligned = Number(item.unaligned) || 0;
-    var total = aligned + unaligned;
-    var alignedPct = total ? Math.round((aligned / total) * 100) : 0;
-    var unalignedPct = total ? Math.max(0, 100 - alignedPct) : 0;
+    if (lean) {
+      return (
+        '<div class="aggregate-label">What participants noticed</div>' +
+        '<div class="lean lean-' + lean + '">' + LEAN_LABELS[lean] + '</div>' +
+        '<div class="lean-note">' + LEAN_NOTE + '</div>' +
+        '<div class="stat"><span class="value">' + count + '</span><span class="label">checked in</span></div>'
+      );
+    }
 
     return (
-      '<div class="aggregate-label">What participants noticed</div>' +
-      '<div class="split">' +
-        '<div class="split-row"><span>Aligned</span><strong>' + alignedPct + '%</strong></div>' +
-        '<div class="split-row"><span>Unaligned</span><strong>' + unalignedPct + '%</strong></div>' +
-      '</div>' +
-      '<div class="stat"><span class="value">' + count + '</span><span class="label">checked in</span></div>'
+      '<div class="progress-lock">' +
+        '<div class="value">' + count + ' of ' + threshold + '</div>' +
+        '<div class="label">checked in</div>' +
+      '</div>'
     );
   }
 

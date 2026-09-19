@@ -13,6 +13,15 @@
 // returned link_url (a signed /s/<token> statement link). No statement is
 // ever issued before that tap. The feed only ever contains live items, so an
 // item that cannot be found there is treated as not available.
+//
+// Lean phase (2026-09-19): below the unlock threshold, progress only, as
+// before. From the unlock threshold to 9 completed check-ins, only a
+// plain-language lean is shown (Leans aligned / Leans unaligned / Mixed)
+// with a one-line note that it is a direction, not a count. The exact split
+// still renders once the API returns it, at 10 completed check-ins. Privacy
+// fix (Mike): this closes the hole where a creator sharing an item with
+// exactly two friends could infer both friends' individual readings from a
+// 3-0 or 1-2 split the moment the item unlocked.
 (function () {
   'use strict';
 
@@ -72,30 +81,54 @@
     els.status.className = 'status' + (isError ? ' error' : '');
   }
 
+  // Plain-language lean labels. Never "aligned: 60%" style wording here: a
+  // lean is a direction, not a count, so nobody reads it as a vote tally.
+  var LEAN_LABELS = {
+    aligned: 'Leans aligned',
+    unaligned: 'Leans unaligned',
+    mixed: 'Mixed'
+  };
+  var LEAN_NOTE = 'A lean shows the general direction so far, not a count.';
+
+  function leanOf(item) {
+    var lean = item.lean;
+    return lean === 'aligned' || lean === 'unaligned' || lean === 'mixed' ? lean : null;
+  }
+
   function progressHtml(item) {
     var count = Number(item.contributor_count);
     if (!isFinite(count) || count < 0) count = 0;
     var threshold = Number(item.unlock_threshold) || 3;
-    var unlocked = item.aligned !== null && item.aligned !== undefined &&
+    var hasExact = item.aligned !== null && item.aligned !== undefined &&
       item.unaligned !== null && item.unaligned !== undefined;
+    var lean = leanOf(item);
 
-    if (!unlocked) {
-      return '<strong>' + count + ' of ' + threshold + '</strong>Results appear after ' + threshold + ' people join.';
+    if (hasExact) {
+      var aligned = Number(item.aligned) || 0;
+      var unaligned = Number(item.unaligned) || 0;
+      var total = aligned + unaligned;
+      var alignedPct = total ? Math.round((aligned / total) * 100) : 0;
+      var unalignedPct = total ? Math.max(0, 100 - alignedPct) : 0;
+      return (
+        '<div class="aggregate-label">What participants noticed</div>' +
+        '<div class="split">' +
+          '<div class="split-row"><span>Aligned</span><strong>' + alignedPct + '%</strong></div>' +
+          '<div class="split-row"><span>Unaligned</span><strong>' + unalignedPct + '%</strong></div>' +
+        '</div>' +
+        count + ' checked in'
+      );
     }
 
-    var aligned = Number(item.aligned) || 0;
-    var unaligned = Number(item.unaligned) || 0;
-    var total = aligned + unaligned;
-    var alignedPct = total ? Math.round((aligned / total) * 100) : 0;
-    var unalignedPct = total ? Math.max(0, 100 - alignedPct) : 0;
-    return (
-      '<div class="aggregate-label">What participants noticed</div>' +
-      '<div class="split">' +
-        '<div class="split-row"><span>Aligned</span><strong>' + alignedPct + '%</strong></div>' +
-        '<div class="split-row"><span>Unaligned</span><strong>' + unalignedPct + '%</strong></div>' +
-      '</div>' +
-      count + ' checked in'
-    );
+    if (lean) {
+      return (
+        '<div class="aggregate-label">What participants noticed</div>' +
+        '<div class="lean lean-' + lean + '">' + LEAN_LABELS[lean] + '</div>' +
+        '<div class="lean-note">' + LEAN_NOTE + '</div>' +
+        count + ' checked in'
+      );
+    }
+
+    return '<strong>' + count + ' of ' + threshold + '</strong>Results appear after ' + threshold + ' people join.';
   }
 
   function renderItem(item) {
