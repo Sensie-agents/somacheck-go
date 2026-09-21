@@ -274,7 +274,8 @@
           <li>Scan the QR code or tap into SomaCheck to open that exact topic.</li>
           <li>Do the 3-second wrist check. Your check-in saves to your account and updates the public aggregate.</li>
           <li>Before five people join, the page shows only progress.</li>
-          <li>After five people join, the World Vibe split appears here for everyone.</li>
+          <li>From five people on, the page shows a lean — a general direction, not a count.</li>
+          <li>Once ten people join, the exact World Vibe split appears here for everyone.</li>
         </ol>
       </div>
 
@@ -447,6 +448,7 @@
           lastCompletedAt: raw.last_completed_at || raw.generated_at || null,
           alignedTotal: alignedTotal,
           unalignedTotal: unalignedTotal,
+          lean: raw.lean === 'aligned' || raw.lean === 'unaligned' || raw.lean === 'mixed' ? raw.lean : null,
           alignedPct: isFinite(Number(raw.aligned_pct)) ? Number(raw.aligned_pct) : null,
           countries: raw.countries || {}
         };
@@ -566,6 +568,13 @@
         }
       }
 
+      var LEAN_LABELS = {
+        aligned: 'Leans aligned',
+        unaligned: 'Leans unaligned',
+        mixed: 'Mixed'
+      };
+      var LEAN_NOTE = 'A lean shows the general direction so far, not a count.';
+
       function renderAggregate(topic) {
         var progress = topic.progress || normalizeProgress();
         if (!progress.unlocked) {
@@ -580,6 +589,24 @@
         var total = progress.contributorCount || 0;
         var alignedTotal = progress.alignedTotal !== null && progress.alignedTotal !== undefined ? progress.alignedTotal : null;
         var unalignedTotal = progress.unalignedTotal !== null && progress.unalignedTotal !== undefined ? progress.unalignedTotal : null;
+        // Below the exact-split threshold (10 completed check-ins) the API
+        // returns no aligned/unaligned counts; show only the lean, never the
+        // numbers, so nobody reads a direction as a vote tally.
+        if (alignedTotal === null || unalignedTotal === null) {
+          var lean = progress.lean;
+          if (lean) {
+            return '<div class="aggregate-label">What participants noticed</div>' +
+              '<div class="lean lean-' + lean + '">' + LEAN_LABELS[lean] + '</div>' +
+              '<div class="lean-note">' + LEAN_NOTE + '</div>' +
+              '<div class="stat"><span class="value">' + total.toLocaleString() + '</span><span class="label">check-ins</span></div>' +
+              '<div class="topic-updated">' + escapeHtml(formatTimestamp(progress.lastCompletedAt)) + '</div>';
+          }
+          return '<div class="progress-lock">' +
+            '<div class="value">' + total.toLocaleString() + '</div>' +
+            '<div class="label">check-ins</div>' +
+            '<div class="topic-updated">' + escapeHtml(formatTimestamp(progress.lastCompletedAt)) + '</div>' +
+          '</div>';
+        }
         var alignedPct = total && alignedTotal !== null ? Math.round((alignedTotal / total) * 100) : progress.alignedPct;
         var unalignedPct = total && unalignedTotal !== null ? Math.round((unalignedTotal / total) * 100) : (alignedPct !== null ? Math.max(0, 100 - alignedPct) : null);
         var splitHtml = '<div class="aggregate-label">What participants noticed</div><div class="split">';
@@ -617,6 +644,7 @@
           lastCompletedAt: next.lastCompletedAt || (topic.progress && topic.progress.lastCompletedAt) || null,
           alignedTotal: next.alignedTotal,
           unalignedTotal: next.unalignedTotal,
+          lean: next.lean,
           alignedPct: next.alignedPct,
           countries: next.countries
         };
