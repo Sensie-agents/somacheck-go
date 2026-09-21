@@ -1,27 +1,36 @@
 // World Vibe live feed (Lane E, 2026-09-17; ranking added at Lane I, 2026-09-18;
 // lean phase added at Lane I, 2026-09-19; vibe indicator redesign at Lane I,
 // 2026-09-21, Mike's feedback: the page was text heavy and needed a
-// glanceable UI feature).
+// glanceable UI feature; second design pass same day, Mike's feedback: the
+// graphic was added but no text was removed -- see the trims called out
+// below).
 //
 // Renders GET {statementApiBase}/v1/public/world-vibe/feed?order=&limit= as
 // cards, polling every 30 seconds and merging without a full re-render so
-// scroll position is not disturbed. Each card leads with the quote and a
-// vibe indicator (see vibeIndicatorHtml below), then the statement and the
+// scroll position is not disturbed. Each card leads with the quote (styled
+// heavier than the statement, so the quote reads first) and a vibe
+// indicator (see vibeIndicatorHtml below), then the statement and the
 // source as secondary lines:
 //   - a ring filled to count/threshold until the API returns a lean, which
 //     it only does at or above the unlock threshold (the count itself is
 //     public, so a precise fill is fine here)
-//   - from there to 9 completed check-ins, a three-stop track showing only
-//     the plain-language lean (Leans aligned / Leans unaligned / Mixed),
-//     never a count or a percentage (privacy fix, Mike 2026-09-19: closes
-//     the hole where a creator sharing with exactly two friends could infer
-//     both friends' individual readings from a 3-0 or 1-2 split)
+//   - from there to 9 completed check-ins, a ring with a fixed-length
+//     colored arc resting on one of three fixed positions (never a
+//     continuous fill), showing only the plain-language lean (Leans aligned
+//     / Leans unaligned / Mixed), never a count or a percentage (privacy
+//     fix, Mike 2026-09-19: closes the hole where a creator sharing with
+//     exactly two friends could infer both friends' individual readings
+//     from a 3-0 or 1-2 split). The one-line explanation of what a lean
+//     means is said once, in the page's #lean-legend, not repeated on every
+//     card (second-pass fix, Mike 2026-09-21); each lean-phase indicator
+//     points to it via aria-describedby.
 //   - a two-tone ring with the exact percentage once the API returns it, at
 //     10 completed check-ins
 //   - the source (site name) linking back to the exact original page
-//   - "Check in on your phone", which opens the item's share link exactly as
-//     the curated topic cards already do
-//   - a Report control that posts to
+//   - "Check in on your phone", the only full-width button on the card
+//   - Report, demoted to a small text control below the actions row (it is
+//     an exception, not a second primary action; still a real <button>, so
+//     it stays reachable by keyboard and screen reader), that posts to
 //     /v1/public/world-vibe/items/{slug}/report
 //
 // Ranked (order=ranked) is the default: it orders by completed check-ins,
@@ -61,7 +70,10 @@
     unaligned: 'Leans unaligned',
     mixed: 'Mixed'
   };
-  var LEAN_NOTE = 'A lean shows the general direction so far, not a count.';
+  // The explanation of what a lean means ("A lean shows the general
+  // direction so far, not a count.") lives once, in index.html's
+  // #lean-legend, instead of a per-card constant here (Mike 2026-09-21: it
+  // was repeating on every card).
 
   var REPORT_REASONS = [
     { value: 'illegal_content', label: 'Illegal content' },
@@ -113,14 +125,17 @@
   }
 
   // Vibe indicator: one glanceable graphic that replaces the old stack of
-  // stat blocks. It changes shape across the three privacy phases instead of
-  // just changing numbers, so nobody reads more precision into it than the
-  // API actually returned:
+  // stat blocks. All three privacy phases render as the same ring (same
+  // size, same position in the card), so the eye learns one place to look,
+  // and each phase fills that ring differently so nobody reads more
+  // precision into it than the API actually returned:
   //   - progress (below unlock_threshold): a ring filled to count/threshold.
   //     The count itself is public, so a precise fill here is honest.
-  //   - lean (unlock_threshold to 9 check-ins): a three-stop track with a
-  //     marker resting on exactly one of three fixed positions, never a
-  //     continuous dial, so it cannot be read as a ratio or an angle.
+  //   - lean (unlock_threshold to 9 check-ins): a fixed-length colored arc
+  //     resting on one of three fixed clock positions. Only the position
+  //     (which of the three) carries information; the arc's length never
+  //     changes and is not derived from the data, so it cannot be read as a
+  //     ratio or an angle.
   //   - split (10+ check-ins): a two-tone ring filled to the exact aligned
   //     percentage, with the percentage itself as the center label.
   // Every phase also carries a plain-word caption, so the phase is available
@@ -142,22 +157,28 @@
       '</svg>';
   }
 
-  // Exactly three fixed stops (never a continuum): unaligned, mixed, aligned.
-  // Only which stop is active carries information; their spacing never does.
-  function vibeTrackHtml(lean) {
-    var stops = [
-      { key: 'unaligned', x: 18 },
-      { key: 'mixed', x: 58 },
-      { key: 'aligned', x: 98 }
-    ];
-    var dots = stops.map(function (stop) {
-      var active = stop.key === lean;
-      return '<circle class="vibe-stop' + (active ? ' vibe-stop-active vibe-stop-' + stop.key : '') + '" cx="' + stop.x + '" cy="19" r="' + (active ? 11 : 7) + '"></circle>';
-    }).join('');
-    return '<svg class="vibe-track" viewBox="0 0 116 38" width="104" height="34" aria-hidden="true" focusable="false">' +
-      '<line class="vibe-track-line" x1="18" y1="19" x2="98" y2="19"></line>' +
-      dots +
-      '</svg>';
+  // Exactly three fixed clock positions (never a continuum): unaligned,
+  // mixed, aligned. Only which position lights up carries information; the
+  // segment length (LEAN_ARC_FRACTION) is constant and never a function of
+  // the actual data, so it can never be read as a ratio or an angle.
+  var LEAN_ARC_FRACTION = 60 / 360;
+  var LEAN_ARC_CENTER_DEG = { unaligned: 240, mixed: 0, aligned: 120 };
+
+  function vibeLeanArcAttrs(lean) {
+    var center = LEAN_ARC_CENTER_DEG[lean];
+    var spanDeg = LEAN_ARC_FRACTION * 360;
+    var startDeg = center - spanDeg / 2;
+    var len = LEAN_ARC_FRACTION * VIBE_RING_C;
+    return 'stroke-dasharray="' + len.toFixed(2) + ' ' + (VIBE_RING_C - len).toFixed(2) + '" transform="rotate(' + (startDeg - 90).toFixed(2) + ' 32 32)"';
+  }
+
+  // Same ring as the progress and split phases; the lean phase just fills a
+  // fixed-length arc at one of the three fixed positions instead of a
+  // count-derived or percentage-derived fraction. No center text: unlike the
+  // other two phases, nothing here should ever look like a number.
+  function vibeLeanRingHtml(lean) {
+    var arc = '<circle class="vibe-ring-arc vibe-ring-arc-lean vibe-ring-arc-lean-' + lean + '" cx="32" cy="32" r="' + VIBE_RING_R + '" ' + vibeLeanArcAttrs(lean) + '></circle>';
+    return vibeRingHtml(arc, null);
   }
 
   function vibeIndicatorHtml(item) {
@@ -185,9 +206,11 @@
       sub = count + ' checked in';
       phase = 'split';
     } else if (lean) {
-      svg = vibeTrackHtml(lean);
+      svg = vibeLeanRingHtml(lean);
       main = LEAN_LABELS[lean];
-      sub = LEAN_NOTE;
+      // Said once for the whole feed (#lean-legend in index.html), not
+      // repeated on every card (Mike 2026-09-21).
+      sub = null;
       phase = 'lean';
     } else {
       svg = vibeRingHtml('<circle class="vibe-ring-arc vibe-ring-arc-progress" cx="32" cy="32" r="' + VIBE_RING_R + '" ' + vibeArcAttrs(threshold ? count / threshold : 0) + '></circle>', count + '/' + threshold);
@@ -196,9 +219,12 @@
       phase = 'progress';
     }
 
-    return '<div class="vibe-indicator" data-phase="' + phase + '">' +
+    var describedBy = phase === 'lean' ? ' aria-describedby="lean-legend"' : '';
+    return '<div class="vibe-indicator" data-phase="' + phase + '"' + describedBy + '>' +
       svg +
-      '<div class="vibe-caption"><div class="vibe-caption-main">' + escapeHtml(main) + '</div><div class="vibe-caption-sub">' + escapeHtml(sub) + '</div></div>' +
+      '<div class="vibe-caption"><div class="vibe-caption-main">' + escapeHtml(main) + '</div>' +
+      (sub ? '<div class="vibe-caption-sub">' + escapeHtml(sub) + '</div>' : '') +
+      '</div>' +
       '</div>';
   }
 
@@ -220,8 +246,8 @@
       '<div class="source-line">Source: <a href="' + escapeHtml(sourceUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(domain) + '</a></div>' +
       '<div class="actions">' +
         '<a class="btn btn-primary" href="' + shareUrlFor(slug) + '">Check in on your phone</a>' +
-        '<button type="button" class="btn btn-secondary report-btn" data-slug="' + escapeHtml(slug) + '">Report</button>' +
       '</div>' +
+      '<button type="button" class="report-link report-btn" data-slug="' + escapeHtml(slug) + '">Report</button>' +
       '<div class="report-panel" data-role="report-panel" hidden>' +
         '<label class="report-label" for="report-reason-' + escapeHtml(slug) + '">Why are you reporting this item?</label>' +
         '<select class="report-reason" id="report-reason-' + escapeHtml(slug) + '">' + reasonOptionsHtml() + '</select>' +

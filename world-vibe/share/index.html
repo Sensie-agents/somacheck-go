@@ -15,24 +15,22 @@
     .source-line { color: var(--faint); font-size: .92rem; margin: 0 0 18px; }
     .source-line a { color: var(--emerald-text); }
     /* Vibe indicator: a single glanceable graphic shared with the feed cards
-       (world-vibe/index.html). It changes shape across the three privacy
-       phases (progress ring, three-stop lean track, two-tone split ring)
-       instead of changing precision, and always carries a plain-word
-       caption as its text alternative. */
+       (world-vibe/index.html). All three privacy phases render as the same
+       ring (progress ring, lean ring with a fixed-position marker, two-tone
+       split ring) instead of changing precision, and always carry a
+       plain-word caption as its text alternative. */
     .vibe-indicator { display: flex; align-items: center; gap: 14px; justify-content: center; margin: 0 0 18px; text-align: left; }
-    .vibe-ring, .vibe-track { flex: 0 0 auto; overflow: visible; }
+    .vibe-ring { flex: 0 0 auto; overflow: visible; }
     .vibe-ring-track { fill: none; stroke: var(--border); stroke-width: 7; }
     .vibe-ring-arc { fill: none; stroke-width: 7; }
     .vibe-ring-arc-progress { stroke: var(--emerald); stroke-linecap: round; }
     .vibe-ring-arc-aligned { stroke: var(--emerald); }
     .vibe-ring-arc-unaligned { stroke: var(--amber); stroke-dasharray: 3 4; }
     .vibe-ring-text { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace; font-size: 13px; font-weight: 700; fill: var(--ink); }
-    .vibe-track-line { stroke: var(--border); stroke-width: 4; stroke-linecap: round; }
-    .vibe-stop { fill: var(--card); stroke: var(--border); stroke-width: 2.5; }
-    .vibe-stop-active { stroke-width: 3; }
-    .vibe-stop-active.vibe-stop-aligned { fill: var(--emerald); stroke: var(--emerald); }
-    .vibe-stop-active.vibe-stop-unaligned { fill: var(--amber); stroke: var(--amber); }
-    .vibe-stop-active.vibe-stop-mixed { fill: var(--muted); stroke: var(--muted); }
+    .vibe-ring-arc-lean { stroke-linecap: round; }
+    .vibe-ring-arc-lean-aligned { stroke: var(--emerald); }
+    .vibe-ring-arc-lean-unaligned { stroke: var(--amber); }
+    .vibe-ring-arc-lean-mixed { stroke: var(--muted); }
     .vibe-caption-main { font-weight: 700; color: var(--ink); font-size: .95rem; }
     .vibe-caption-sub { color: var(--faint); font-size: .8rem; margin-top: 2px; }
     /* topic.css's .button sets its own display, which otherwise beats the

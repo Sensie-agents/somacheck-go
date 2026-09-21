@@ -101,19 +101,25 @@
   }
 
   // Vibe indicator: one glanceable graphic that replaces the old stack of
-  // stat blocks. It changes shape across the three privacy phases instead of
-  // just changing numbers, so nobody reads more precision into it than the
-  // API actually returned:
+  // stat blocks. All three privacy phases render as the same ring (same
+  // size, same position on the card), and each phase fills that ring
+  // differently so nobody reads more precision into it than the API
+  // actually returned:
   //   - progress (below unlock_threshold): a ring filled to count/threshold.
   //     The count itself is public, so a precise fill here is honest.
-  //   - lean (unlock_threshold to 9 check-ins): a three-stop track with a
-  //     marker resting on exactly one of three fixed positions, never a
-  //     continuous dial, so it cannot be read as a ratio or an angle.
+  //   - lean (unlock_threshold to 9 check-ins): a fixed-length colored arc
+  //     resting on one of three fixed clock positions. Only the position
+  //     (which of the three) carries information; the arc's length never
+  //     changes and is not derived from the data, so it cannot be read as a
+  //     ratio or an angle.
   //   - split (10+ check-ins): a two-tone ring filled to the exact aligned
   //     percentage, with the percentage itself as the center label.
   // Every phase also carries a plain-word caption, so the phase is available
   // as text, not only as a shape. (Kept in sync with feed.js's copy of this
-  // function; there is no shared module between the two pages.)
+  // function; there is no shared module between the two pages. This page
+  // shows only one item at a time, so unlike feed.js it keeps the lean note
+  // on the card instead of moving it to a page-level legend -- there is
+  // nothing here for it to repeat against.)
   var VIBE_RING_R = 26;
   var VIBE_RING_C = 2 * Math.PI * VIBE_RING_R;
 
@@ -131,22 +137,28 @@
       '</svg>';
   }
 
-  // Exactly three fixed stops (never a continuum): unaligned, mixed, aligned.
-  // Only which stop is active carries information; their spacing never does.
-  function vibeTrackHtml(lean) {
-    var stops = [
-      { key: 'unaligned', x: 18 },
-      { key: 'mixed', x: 58 },
-      { key: 'aligned', x: 98 }
-    ];
-    var dots = stops.map(function (stop) {
-      var active = stop.key === lean;
-      return '<circle class="vibe-stop' + (active ? ' vibe-stop-active vibe-stop-' + stop.key : '') + '" cx="' + stop.x + '" cy="19" r="' + (active ? 11 : 7) + '"></circle>';
-    }).join('');
-    return '<svg class="vibe-track" viewBox="0 0 116 38" width="104" height="34" aria-hidden="true" focusable="false">' +
-      '<line class="vibe-track-line" x1="18" y1="19" x2="98" y2="19"></line>' +
-      dots +
-      '</svg>';
+  // Exactly three fixed clock positions (never a continuum): unaligned,
+  // mixed, aligned. Only which position lights up carries information; the
+  // segment length (LEAN_ARC_FRACTION) is constant and never a function of
+  // the actual data, so it can never be read as a ratio or an angle.
+  var LEAN_ARC_FRACTION = 60 / 360;
+  var LEAN_ARC_CENTER_DEG = { unaligned: 240, mixed: 0, aligned: 120 };
+
+  function vibeLeanArcAttrs(lean) {
+    var center = LEAN_ARC_CENTER_DEG[lean];
+    var spanDeg = LEAN_ARC_FRACTION * 360;
+    var startDeg = center - spanDeg / 2;
+    var len = LEAN_ARC_FRACTION * VIBE_RING_C;
+    return 'stroke-dasharray="' + len.toFixed(2) + ' ' + (VIBE_RING_C - len).toFixed(2) + '" transform="rotate(' + (startDeg - 90).toFixed(2) + ' 32 32)"';
+  }
+
+  // Same ring as the progress and split phases; the lean phase just fills a
+  // fixed-length arc at one of the three fixed positions instead of a
+  // count-derived or percentage-derived fraction. No center text: unlike the
+  // other two phases, nothing here should ever look like a number.
+  function vibeLeanRingHtml(lean) {
+    var arc = '<circle class="vibe-ring-arc vibe-ring-arc-lean vibe-ring-arc-lean-' + lean + '" cx="32" cy="32" r="' + VIBE_RING_R + '" ' + vibeLeanArcAttrs(lean) + '></circle>';
+    return vibeRingHtml(arc, null);
   }
 
   function vibeIndicatorHtml(item) {
@@ -174,7 +186,7 @@
       sub = count + ' checked in';
       phase = 'split';
     } else if (lean) {
-      svg = vibeTrackHtml(lean);
+      svg = vibeLeanRingHtml(lean);
       main = LEAN_LABELS[lean];
       sub = LEAN_NOTE;
       phase = 'lean';

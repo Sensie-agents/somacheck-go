@@ -89,6 +89,10 @@
     .how strong { color: var(--ink); }
     .how ol { margin: 12px 0 0 20px; }
     .how li { margin: 8px 0; }
+    /* Feed tab's how-it-works is a <details>, collapsed by default, so the
+       first card is visible without scrolling on a phone (Mike 2026-09-21). */
+    .how summary { font-weight: 700; color: var(--ink); cursor: pointer; }
+    .how[open] summary { margin-bottom: 4px; }
     .topics { display: grid; gap: 24px; }
     .topic {
       background: var(--card);
@@ -210,30 +214,53 @@
     }
     .order-btn.active { background: var(--emerald-soft); color: var(--emerald-text); border-color: var(--emerald); }
     .feed-order-note { color: var(--faint); font-size: .85rem; }
-    .feed-card .quote { font-size: 1.05rem; font-style: italic; color: var(--ink); margin-bottom: 10px; }
-    .feed-card .statement { font-size: 1.05rem; font-weight: 600; margin: 2px 0 14px; }
+    /* Said once for the whole feed, not per card (Mike 2026-09-21: the lean
+       caption was repeating on every card). Lean-phase indicators point back
+       here via aria-describedby instead of repeating this text. */
+    .lean-legend { text-align: center; color: var(--faint); font-size: .85rem; margin: -8px 0 20px; }
+    /* Quote leads each card; the statement is a secondary line underneath it
+       (Mike 2026-09-21: the hierarchy read inverted -- the statement was
+       heavier than the quote). */
+    .feed-card .quote { font-size: 1.2rem; font-weight: 650; font-style: italic; color: var(--ink); line-height: 1.35; margin-bottom: 14px; }
+    .feed-card .statement { font-size: .95rem; font-weight: 500; color: var(--muted); margin: 2px 0 14px; }
     .feed-card .source-line { color: var(--muted); font-size: .92rem; margin: 16px 0; }
     /* Vibe indicator: a single glanceable graphic shared by the feed cards
        and the single-item share page. It changes shape across the three
-       privacy phases (progress ring, three-stop lean track, two-tone split
-       ring) instead of changing precision, and always carries a plain-word
-       caption as its text alternative. */
+       privacy phases, always as a ring of the same size and position, so all
+       three phases share one visual slot and the eye learns one place to
+       look (Mike 2026-09-21):
+         - progress: a ring filled to count/threshold
+         - lean: a fixed-length colored arc resting on one of three fixed
+           clock positions -- only the position carries information, the arc
+           length never changes, so it cannot be read as a ratio or an angle
+         - split: a two-tone ring filled to the exact percentage
+       Every phase also carries a plain-word caption as its text alternative. */
     .vibe-indicator { display: flex; align-items: center; gap: 14px; margin: 2px 0 16px; }
-    .vibe-ring, .vibe-track { flex: 0 0 auto; overflow: visible; }
+    .vibe-ring { flex: 0 0 auto; overflow: visible; }
     .vibe-ring-track { fill: none; stroke: var(--border); stroke-width: 7; }
     .vibe-ring-arc { fill: none; stroke-width: 7; }
     .vibe-ring-arc-progress { stroke: var(--emerald); stroke-linecap: round; }
     .vibe-ring-arc-aligned { stroke: var(--emerald); }
     .vibe-ring-arc-unaligned { stroke: var(--amber); stroke-dasharray: 3 4; }
     .vibe-ring-text { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace; font-size: 13px; font-weight: 700; fill: var(--ink); }
-    .vibe-track-line { stroke: var(--border); stroke-width: 4; stroke-linecap: round; }
-    .vibe-stop { fill: var(--card); stroke: var(--border); stroke-width: 2.5; }
-    .vibe-stop-active { stroke-width: 3; }
-    .vibe-stop-active.vibe-stop-aligned { fill: var(--emerald); stroke: var(--emerald); }
-    .vibe-stop-active.vibe-stop-unaligned { fill: var(--amber); stroke: var(--amber); }
-    .vibe-stop-active.vibe-stop-mixed { fill: var(--muted); stroke: var(--muted); }
+    /* Lean marker: a fixed-length arc, rounded like the progress ring's fill,
+       colored by direction. A separate class from vibe-ring-arc-aligned /
+       -unaligned above so it never inherits their positioning or the split
+       ring's dashed texture, only their color. */
+    .vibe-ring-arc-lean { stroke-linecap: round; }
+    .vibe-ring-arc-lean-aligned { stroke: var(--emerald); }
+    .vibe-ring-arc-lean-unaligned { stroke: var(--amber); }
+    .vibe-ring-arc-lean-mixed { stroke: var(--muted); }
     .vibe-caption-main { font-weight: 700; color: var(--ink); font-size: .95rem; }
     .vibe-caption-sub { color: var(--faint); font-size: .8rem; margin-top: 2px; }
+    /* Report is an exception, not the primary action; Check in stays the only
+       full-width button (Mike 2026-09-21: the two read as equally weighted). */
+    .report-link {
+      display: inline-block; margin-top: 10px; padding: 4px 0; border: none; background: none;
+      color: var(--faint); font-family: var(--font-body); font-size: .82rem; text-decoration: underline;
+      cursor: pointer;
+    }
+    .report-link:hover { color: var(--muted); }
     .report-panel { margin-top: 14px; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg); display: grid; gap: 10px; }
     .report-panel[hidden] { display: none; }
     .report-label { font-size: .92rem; color: var(--muted); font-weight: 600; }
@@ -256,7 +283,7 @@
     <header>
       <div class="brand">SomaCheck</div>
       <h1>World Vibe</h1>
-      <p class="lede">Live check-ins on quotes from anywhere on the web, plus three curated topics. Add your 3-second wrist check and watch the aggregate unlock.</p>
+      <p class="lede">Live check-ins on quotes from the web, plus curated topics. Add yours in 3 seconds.</p>
     </header>
 
     <div class="tabs" role="tablist">
@@ -265,15 +292,15 @@
     </div>
 
     <section id="feed-panel" class="tab-panel active" role="tabpanel" aria-labelledby="tab-feed">
-      <div class="how">
-        <strong>How it works:</strong>
+      <details class="how">
+        <summary>How it works</summary>
         <ol>
           <li>Browse quotes people are checking their gut against right now.</li>
           <li>Tap Check in on your phone to add your own 3-second wrist check.</li>
           <li>Before 3 people join, a card shows only progress.</li>
           <li>At 3 people, the split appears here for everyone.</li>
         </ol>
-      </div>
+      </details>
 
       <div class="feed-order-row">
         <div class="feed-order" role="group" aria-label="Feed order">
@@ -282,6 +309,8 @@
         </div>
         <p class="feed-order-note" id="feed-order-note">Ordered by completed check-ins.</p>
       </div>
+
+      <p class="lean-legend" id="lean-legend">A lean shows the general direction so far, not a count.</p>
 
       <div id="feed-list" class="topics" aria-live="polite">
         <div class="empty">Loading the feed...</div>
@@ -296,7 +325,7 @@
           <li>Scan the QR code or tap into SomaCheck to open that exact topic.</li>
           <li>Do the 3-second wrist check. Your check-in saves to your account and updates the public aggregate.</li>
           <li>Before five people join, the page shows only progress.</li>
-          <li>From five people on, the page shows a lean — a general direction, not a count.</li>
+          <li>From five people on, the page shows a lean: a general direction, not a count.</li>
           <li>Once ten people join, the exact World Vibe split appears here for everyone.</li>
         </ol>
       </div>
