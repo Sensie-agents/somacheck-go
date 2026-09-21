@@ -1,18 +1,23 @@
 // World Vibe live feed (Lane E, 2026-09-17; ranking added at Lane I, 2026-09-18;
-// lean phase added at Lane I, 2026-09-19).
+// lean phase added at Lane I, 2026-09-19; vibe indicator redesign at Lane I,
+// 2026-09-21, Mike's feedback: the page was text heavy and needed a
+// glanceable UI feature).
 //
 // Renders GET {statementApiBase}/v1/public/world-vibe/feed?order=&limit= as
 // cards, polling every 30 seconds and merging without a full re-render so
-// scroll position is not disturbed. Each card exposes:
-//   - the quote and the statement
-//   - "X of Y checked in" until the API returns a lean, which it only does
-//     at or above the unlock threshold; from there to 9 completed check-ins
-//     the card shows only a plain-language lean (Leans aligned / Leans
-//     unaligned / Mixed) with a one-line note that it is a direction, not a
-//     count; the exact split still appears once the API returns it, at 10
-//     completed check-ins (privacy fix, Mike 2026-09-19: closes the hole
-//     where a creator sharing with exactly two friends could infer both
-//     friends' individual readings from a 3-0 or 1-2 split)
+// scroll position is not disturbed. Each card leads with the quote and a
+// vibe indicator (see vibeIndicatorHtml below), then the statement and the
+// source as secondary lines:
+//   - a ring filled to count/threshold until the API returns a lean, which
+//     it only does at or above the unlock threshold (the count itself is
+//     public, so a precise fill is fine here)
+//   - from there to 9 completed check-ins, a three-stop track showing only
+//     the plain-language lean (Leans aligned / Leans unaligned / Mixed),
+//     never a count or a percentage (privacy fix, Mike 2026-09-19: closes
+//     the hole where a creator sharing with exactly two friends could infer
+//     both friends' individual readings from a 3-0 or 1-2 split)
+//   - a two-tone ring with the exact percentage once the API returns it, at
+//     10 completed check-ins
 //   - the source (site name) linking back to the exact original page
 //   - "Check in on your phone", which opens the item's share link exactly as
 //     the curated topic cards already do
@@ -107,13 +112,62 @@
     return lean === 'aligned' || lean === 'unaligned' || lean === 'mixed' ? lean : null;
   }
 
-  function progressHtml(item) {
+  // Vibe indicator: one glanceable graphic that replaces the old stack of
+  // stat blocks. It changes shape across the three privacy phases instead of
+  // just changing numbers, so nobody reads more precision into it than the
+  // API actually returned:
+  //   - progress (below unlock_threshold): a ring filled to count/threshold.
+  //     The count itself is public, so a precise fill here is honest.
+  //   - lean (unlock_threshold to 9 check-ins): a three-stop track with a
+  //     marker resting on exactly one of three fixed positions, never a
+  //     continuous dial, so it cannot be read as a ratio or an angle.
+  //   - split (10+ check-ins): a two-tone ring filled to the exact aligned
+  //     percentage, with the percentage itself as the center label.
+  // Every phase also carries a plain-word caption, so the phase is available
+  // as text, not only as a shape.
+  var VIBE_RING_R = 26;
+  var VIBE_RING_C = 2 * Math.PI * VIBE_RING_R;
+
+  function vibeArcAttrs(fraction) {
+    var clamped = Math.max(0, Math.min(1, fraction));
+    var len = clamped * VIBE_RING_C;
+    return 'stroke-dasharray="' + len.toFixed(2) + ' ' + (VIBE_RING_C - len).toFixed(2) + '" transform="rotate(-90 32 32)"';
+  }
+
+  function vibeRingHtml(arcsHtml, centerText) {
+    return '<svg class="vibe-ring" viewBox="0 0 64 64" width="56" height="56" aria-hidden="true" focusable="false">' +
+      '<circle class="vibe-ring-track" cx="32" cy="32" r="' + VIBE_RING_R + '"></circle>' +
+      arcsHtml +
+      (centerText ? '<text x="32" y="37" text-anchor="middle" class="vibe-ring-text">' + escapeHtml(centerText) + '</text>' : '') +
+      '</svg>';
+  }
+
+  // Exactly three fixed stops (never a continuum): unaligned, mixed, aligned.
+  // Only which stop is active carries information; their spacing never does.
+  function vibeTrackHtml(lean) {
+    var stops = [
+      { key: 'unaligned', x: 18 },
+      { key: 'mixed', x: 58 },
+      { key: 'aligned', x: 98 }
+    ];
+    var dots = stops.map(function (stop) {
+      var active = stop.key === lean;
+      return '<circle class="vibe-stop' + (active ? ' vibe-stop-active vibe-stop-' + stop.key : '') + '" cx="' + stop.x + '" cy="19" r="' + (active ? 11 : 7) + '"></circle>';
+    }).join('');
+    return '<svg class="vibe-track" viewBox="0 0 116 38" width="104" height="34" aria-hidden="true" focusable="false">' +
+      '<line class="vibe-track-line" x1="18" y1="19" x2="98" y2="19"></line>' +
+      dots +
+      '</svg>';
+  }
+
+  function vibeIndicatorHtml(item) {
     var count = Number(item.contributor_count);
     if (!isFinite(count) || count < 0) count = 0;
     var threshold = Number(item.unlock_threshold) || 3;
     var hasExact = item.aligned !== null && item.aligned !== undefined &&
       item.unaligned !== null && item.unaligned !== undefined;
     var lean = leanOf(item);
+    var svg, main, sub, phase;
 
     if (hasExact) {
       var aligned = Number(item.aligned) || 0;
@@ -121,32 +175,31 @@
       var total = aligned + unaligned;
       var alignedPct = total ? Math.round((aligned / total) * 100) : 0;
       var unalignedPct = total ? Math.max(0, 100 - alignedPct) : 0;
-
-      return (
-        '<div class="aggregate-label">What participants noticed</div>' +
-        '<div class="split">' +
-          '<div class="split-row"><span>Aligned</span><strong>' + alignedPct + '%</strong></div>' +
-          '<div class="split-row"><span>Unaligned</span><strong>' + unalignedPct + '%</strong></div>' +
-        '</div>' +
-        '<div class="stat"><span class="value">' + count + '</span><span class="label">checked in</span></div>'
-      );
+      // The unaligned circle is a full, dashed-texture ring; the aligned arc
+      // is drawn solid on top of it for the exact aligned fraction, so the
+      // two shares stay distinguishable without relying on color alone.
+      var arcs = '<circle class="vibe-ring-arc vibe-ring-arc-unaligned" cx="32" cy="32" r="' + VIBE_RING_R + '"></circle>' +
+        '<circle class="vibe-ring-arc vibe-ring-arc-aligned" cx="32" cy="32" r="' + VIBE_RING_R + '" ' + vibeArcAttrs(alignedPct / 100) + '></circle>';
+      svg = vibeRingHtml(arcs, alignedPct + '%');
+      main = alignedPct + '% aligned, ' + unalignedPct + '% unaligned';
+      sub = count + ' checked in';
+      phase = 'split';
+    } else if (lean) {
+      svg = vibeTrackHtml(lean);
+      main = LEAN_LABELS[lean];
+      sub = LEAN_NOTE;
+      phase = 'lean';
+    } else {
+      svg = vibeRingHtml('<circle class="vibe-ring-arc vibe-ring-arc-progress" cx="32" cy="32" r="' + VIBE_RING_R + '" ' + vibeArcAttrs(threshold ? count / threshold : 0) + '></circle>', count + '/' + threshold);
+      main = count + ' of ' + threshold + ' checked in';
+      sub = 'Unlocks once ' + threshold + ' people join.';
+      phase = 'progress';
     }
 
-    if (lean) {
-      return (
-        '<div class="aggregate-label">What participants noticed</div>' +
-        '<div class="lean lean-' + lean + '">' + LEAN_LABELS[lean] + '</div>' +
-        '<div class="lean-note">' + LEAN_NOTE + '</div>' +
-        '<div class="stat"><span class="value">' + count + '</span><span class="label">checked in</span></div>'
-      );
-    }
-
-    return (
-      '<div class="progress-lock">' +
-        '<div class="value">' + count + ' of ' + threshold + '</div>' +
-        '<div class="label">checked in</div>' +
-      '</div>'
-    );
+    return '<div class="vibe-indicator" data-phase="' + phase + '">' +
+      svg +
+      '<div class="vibe-caption"><div class="vibe-caption-main">' + escapeHtml(main) + '</div><div class="vibe-caption-sub">' + escapeHtml(sub) + '</div></div>' +
+      '</div>';
   }
 
   function reasonOptionsHtml() {
@@ -162,8 +215,8 @@
     var slug = item.slug;
     return (
       '<div class="quote">“' + escapeHtml(item.quote) + '”</div>' +
+      '<div data-role="vibe">' + vibeIndicatorHtml(item) + '</div>' +
       '<div class="statement">' + escapeHtml(item.statement) + '</div>' +
-      '<div data-role="progress">' + progressHtml(item) + '</div>' +
       '<div class="source-line">Source: <a href="' + escapeHtml(sourceUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(domain) + '</a></div>' +
       '<div class="actions">' +
         '<a class="btn btn-primary" href="' + shareUrlFor(slug) + '">Check in on your phone</a>' +
@@ -254,8 +307,8 @@
   function updateCard(item) {
     var el = document.getElementById('feed-item-' + item.slug);
     if (!el) return;
-    var progressEl = el.querySelector('[data-role="progress"]');
-    if (progressEl) progressEl.innerHTML = progressHtml(item);
+    var vibeEl = el.querySelector('[data-role="vibe"]');
+    if (vibeEl) vibeEl.innerHTML = vibeIndicatorHtml(item);
   }
 
   function renderEmpty() {

@@ -22,6 +22,11 @@
 // fix (Mike): this closes the hole where a creator sharing an item with
 // exactly two friends could infer both friends' individual readings from a
 // 3-0 or 1-2 split the moment the item unlocked.
+//
+// Vibe indicator redesign (2026-09-21, Mike's feedback: the page was text
+// heavy and needed a glanceable UI feature): the quote leads, then the vibe
+// indicator (see vibeIndicatorHtml below), with the statement and source as
+// secondary lines.
 (function () {
   'use strict';
 
@@ -95,13 +100,63 @@
     return lean === 'aligned' || lean === 'unaligned' || lean === 'mixed' ? lean : null;
   }
 
-  function progressHtml(item) {
+  // Vibe indicator: one glanceable graphic that replaces the old stack of
+  // stat blocks. It changes shape across the three privacy phases instead of
+  // just changing numbers, so nobody reads more precision into it than the
+  // API actually returned:
+  //   - progress (below unlock_threshold): a ring filled to count/threshold.
+  //     The count itself is public, so a precise fill here is honest.
+  //   - lean (unlock_threshold to 9 check-ins): a three-stop track with a
+  //     marker resting on exactly one of three fixed positions, never a
+  //     continuous dial, so it cannot be read as a ratio or an angle.
+  //   - split (10+ check-ins): a two-tone ring filled to the exact aligned
+  //     percentage, with the percentage itself as the center label.
+  // Every phase also carries a plain-word caption, so the phase is available
+  // as text, not only as a shape. (Kept in sync with feed.js's copy of this
+  // function; there is no shared module between the two pages.)
+  var VIBE_RING_R = 26;
+  var VIBE_RING_C = 2 * Math.PI * VIBE_RING_R;
+
+  function vibeArcAttrs(fraction) {
+    var clamped = Math.max(0, Math.min(1, fraction));
+    var len = clamped * VIBE_RING_C;
+    return 'stroke-dasharray="' + len.toFixed(2) + ' ' + (VIBE_RING_C - len).toFixed(2) + '" transform="rotate(-90 32 32)"';
+  }
+
+  function vibeRingHtml(arcsHtml, centerText) {
+    return '<svg class="vibe-ring" viewBox="0 0 64 64" width="56" height="56" aria-hidden="true" focusable="false">' +
+      '<circle class="vibe-ring-track" cx="32" cy="32" r="' + VIBE_RING_R + '"></circle>' +
+      arcsHtml +
+      (centerText ? '<text x="32" y="37" text-anchor="middle" class="vibe-ring-text">' + escapeHtml(centerText) + '</text>' : '') +
+      '</svg>';
+  }
+
+  // Exactly three fixed stops (never a continuum): unaligned, mixed, aligned.
+  // Only which stop is active carries information; their spacing never does.
+  function vibeTrackHtml(lean) {
+    var stops = [
+      { key: 'unaligned', x: 18 },
+      { key: 'mixed', x: 58 },
+      { key: 'aligned', x: 98 }
+    ];
+    var dots = stops.map(function (stop) {
+      var active = stop.key === lean;
+      return '<circle class="vibe-stop' + (active ? ' vibe-stop-active vibe-stop-' + stop.key : '') + '" cx="' + stop.x + '" cy="19" r="' + (active ? 11 : 7) + '"></circle>';
+    }).join('');
+    return '<svg class="vibe-track" viewBox="0 0 116 38" width="104" height="34" aria-hidden="true" focusable="false">' +
+      '<line class="vibe-track-line" x1="18" y1="19" x2="98" y2="19"></line>' +
+      dots +
+      '</svg>';
+  }
+
+  function vibeIndicatorHtml(item) {
     var count = Number(item.contributor_count);
     if (!isFinite(count) || count < 0) count = 0;
     var threshold = Number(item.unlock_threshold) || 3;
     var hasExact = item.aligned !== null && item.aligned !== undefined &&
       item.unaligned !== null && item.unaligned !== undefined;
     var lean = leanOf(item);
+    var svg, main, sub, phase;
 
     if (hasExact) {
       var aligned = Number(item.aligned) || 0;
@@ -109,32 +164,37 @@
       var total = aligned + unaligned;
       var alignedPct = total ? Math.round((aligned / total) * 100) : 0;
       var unalignedPct = total ? Math.max(0, 100 - alignedPct) : 0;
-      return (
-        '<div class="aggregate-label">What participants noticed</div>' +
-        '<div class="split">' +
-          '<div class="split-row"><span>Aligned</span><strong>' + alignedPct + '%</strong></div>' +
-          '<div class="split-row"><span>Unaligned</span><strong>' + unalignedPct + '%</strong></div>' +
-        '</div>' +
-        count + ' checked in'
-      );
+      // The unaligned circle is a full, dashed-texture ring; the aligned arc
+      // is drawn solid on top of it for the exact aligned fraction, so the
+      // two shares stay distinguishable without relying on color alone.
+      var arcs = '<circle class="vibe-ring-arc vibe-ring-arc-unaligned" cx="32" cy="32" r="' + VIBE_RING_R + '"></circle>' +
+        '<circle class="vibe-ring-arc vibe-ring-arc-aligned" cx="32" cy="32" r="' + VIBE_RING_R + '" ' + vibeArcAttrs(alignedPct / 100) + '></circle>';
+      svg = vibeRingHtml(arcs, alignedPct + '%');
+      main = alignedPct + '% aligned, ' + unalignedPct + '% unaligned';
+      sub = count + ' checked in';
+      phase = 'split';
+    } else if (lean) {
+      svg = vibeTrackHtml(lean);
+      main = LEAN_LABELS[lean];
+      sub = LEAN_NOTE;
+      phase = 'lean';
+    } else {
+      svg = vibeRingHtml('<circle class="vibe-ring-arc vibe-ring-arc-progress" cx="32" cy="32" r="' + VIBE_RING_R + '" ' + vibeArcAttrs(threshold ? count / threshold : 0) + '></circle>', count + '/' + threshold);
+      main = count + ' of ' + threshold + ' checked in';
+      sub = 'Unlocks once ' + threshold + ' people join.';
+      phase = 'progress';
     }
 
-    if (lean) {
-      return (
-        '<div class="aggregate-label">What participants noticed</div>' +
-        '<div class="lean lean-' + lean + '">' + LEAN_LABELS[lean] + '</div>' +
-        '<div class="lean-note">' + LEAN_NOTE + '</div>' +
-        count + ' checked in'
-      );
-    }
-
-    return '<strong>' + count + ' of ' + threshold + '</strong>Results appear after ' + threshold + ' people join.';
+    return '<div class="vibe-indicator" data-phase="' + phase + '">' +
+      svg +
+      '<div class="vibe-caption"><div class="vibe-caption-main">' + escapeHtml(main) + '</div><div class="vibe-caption-sub">' + escapeHtml(sub) + '</div></div>' +
+      '</div>';
   }
 
   function renderItem(item) {
     els.quote.textContent = item.quote || '';
     els.statement.textContent = item.statement || '';
-    els.progress.innerHTML = progressHtml(item);
+    els.progress.innerHTML = vibeIndicatorHtml(item);
     if (item.source_url) {
       els.sourceLink.href = item.source_url;
       els.sourceLink.textContent = item.domain || item.source_url;

@@ -8,6 +8,8 @@
   --emerald-hover: #0e8576;
   --emerald-soft: rgba(18, 165, 148, 0.10);
   --emerald-text: #0c6b60;
+  --amber: #f4b26b;
+  --amber-text: #8f663c;
   --border: #e8e0d4;
 }
 
@@ -21,6 +23,7 @@
     --border: #252b2f;
     --emerald-soft: rgba(18, 165, 148, 0.14);
     --emerald-text: #12a594;
+    --amber-text: #f4b26b;
   }
 }
 
