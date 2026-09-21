@@ -132,6 +132,11 @@
       color: var(--muted);
     }
     .split-row strong { color: var(--ink); font-size: 1.1rem; }
+    .lean { font-size: 1.3rem; font-weight: 800; margin: 4px 0 2px; }
+    .lean-aligned { color: var(--emerald-text); }
+    .lean-unaligned { color: var(--amber-text); }
+    .lean-mixed { color: var(--muted); }
+    .lean-note { color: var(--faint); font-size: .85rem; margin-bottom: 12px; }
     .countries { display: flex; flex-wrap: wrap; gap: 8px; }
     .country {
       background: var(--amber-soft);
@@ -187,6 +192,34 @@
     .note { background: var(--emerald-soft); border-left: 3px solid var(--emerald); padding: 16px 20px; border-radius: 0 12px 12px 0; color: var(--muted); font-size: .95rem; margin-bottom: 32px; }
     .note strong { color: var(--ink); }
     .last-updated { text-align: center; color: var(--faint); font-size: 12px; margin-top: 16px; font-family: var(--font-mono); }
+    .tabs { display: flex; justify-content: center; gap: 8px; margin-bottom: 32px; }
+    .tab-btn {
+      background: transparent; border: 1px solid var(--border); color: var(--muted);
+      font-family: var(--font-body); font-weight: 700; font-size: 14px;
+      padding: 10px 22px; border-radius: 999px; cursor: pointer; transition: background .15s, color .15s;
+    }
+    .tab-btn.active { background: var(--emerald); color: #fff; border-color: var(--emerald); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .feed-order-row { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 24px; }
+    .feed-order { display: flex; gap: 8px; }
+    .order-btn {
+      background: transparent; border: 1px solid var(--border); color: var(--muted);
+      font-family: var(--font-body); font-weight: 700; font-size: 13px;
+      padding: 8px 18px; border-radius: 999px; cursor: pointer; transition: background .15s, color .15s;
+    }
+    .order-btn.active { background: var(--emerald-soft); color: var(--emerald-text); border-color: var(--emerald); }
+    .feed-order-note { color: var(--faint); font-size: .85rem; }
+    .feed-card .quote { font-size: 1.05rem; font-style: italic; color: var(--ink); margin-bottom: 10px; }
+    .feed-card .source-line { color: var(--muted); font-size: .92rem; margin: 16px 0; }
+    .report-panel { margin-top: 14px; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg); display: grid; gap: 10px; }
+    .report-panel[hidden] { display: none; }
+    .report-label { font-size: .92rem; color: var(--muted); font-weight: 600; }
+    .report-reason {
+      font-family: var(--font-body); font-size: 15px; padding: 10px 12px; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--card); color: var(--ink);
+    }
+    .report-actions { display: flex; gap: 10px; flex-wrap: wrap; }
     @media (max-width: 720px) {
       .topic-body { grid-template-columns: 1fr; }
       .qr { order: -1; }
@@ -201,25 +234,56 @@
     <header>
       <div class="brand">SomaCheck</div>
       <h1>World Vibe</h1>
-      <p class="lede">Topics shaping work, culture, and leadership. Open one in SomaCheck, add your check-in in 3 seconds, and watch the aggregate unlock.</p>
+      <p class="lede">Live check-ins on quotes from anywhere on the web, plus three curated topics. Add your 3-second wrist check and watch the aggregate unlock.</p>
     </header>
 
-    <div class="how">
-      <strong>How it works:</strong>
-      <ol>
-        <li>Pick a statement that catches you.</li>
-        <li>Scan the QR code or tap into SomaCheck to open that exact topic.</li>
-        <li>Do the 3-second wrist check. Your check-in saves to your account and updates the public aggregate.</li>
-        <li>Before five people join, the page shows only progress.</li>
-        <li>After five people join, the World Vibe split appears here for everyone.</li>
-      </ol>
+    <div class="tabs" role="tablist">
+      <button type="button" class="tab-btn active" role="tab" aria-selected="true" data-tab="feed" id="tab-feed">Feed</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" data-tab="topics" id="tab-topics">Topics</button>
     </div>
 
-    <div id="topics" class="topics" aria-live="polite">
-      <div class="empty">Loading topics...</div>
-    </div>
+    <section id="feed-panel" class="tab-panel active" role="tabpanel" aria-labelledby="tab-feed">
+      <div class="how">
+        <strong>How it works:</strong>
+        <ol>
+          <li>Browse quotes people are checking their gut against right now.</li>
+          <li>Tap Check in on your phone to add your own 3-second wrist check.</li>
+          <li>Before 3 people join, a card shows only progress.</li>
+          <li>At 3 people, the split appears here for everyone.</li>
+        </ol>
+      </div>
 
-    <p class="last-updated" id="last-updated"></p>
+      <div class="feed-order-row">
+        <div class="feed-order" role="group" aria-label="Feed order">
+          <button type="button" class="order-btn active" data-order="ranked" aria-pressed="true">Ranked</button>
+          <button type="button" class="order-btn" data-order="recent" aria-pressed="false">Newest</button>
+        </div>
+        <p class="feed-order-note" id="feed-order-note">Ordered by completed check-ins.</p>
+      </div>
+
+      <div id="feed-list" class="topics" aria-live="polite">
+        <div class="empty">Loading the feed...</div>
+      </div>
+    </section>
+
+    <section id="topics-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-topics">
+      <div class="how">
+        <strong>How it works:</strong>
+        <ol>
+          <li>Pick a statement that catches you.</li>
+          <li>Scan the QR code or tap into SomaCheck to open that exact topic.</li>
+          <li>Do the 3-second wrist check. Your check-in saves to your account and updates the public aggregate.</li>
+          <li>Before five people join, the page shows only progress.</li>
+          <li>After five people join, the World Vibe split appears here for everyone.</li>
+        </ol>
+      </div>
+
+      <div id="topics" class="topics" aria-live="polite">
+        <div class="empty">Loading topics...</div>
+      </div>
+
+      <p class="last-updated" id="last-updated"></p>
+    </section>
 
     <footer>
       <nav>
@@ -753,5 +817,6 @@
       }, POLL_MS);
     })();
   </script>
+  <script src="/world-vibe/feed.js" defer></script>
 </body>
 </html>

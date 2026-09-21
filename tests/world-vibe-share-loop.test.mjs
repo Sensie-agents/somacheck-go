@@ -12,10 +12,12 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = process.env.WVSMART_ROOT || path.resolve(here, '..');
 const sourcePath = path.join(root, 'world-vibe', 'index.html');
 const topicsPath = path.join(root, 'world-vibe', 'topics.json');
+const feedScriptPath = path.join(root, 'world-vibe', 'feed.js');
 
-const [source, topicsJson] = await Promise.all([
+const [source, topicsJson, feedScript] = await Promise.all([
   readFile(sourcePath, 'utf8'),
-  readFile(topicsPath, 'utf8')
+  readFile(topicsPath, 'utf8'),
+  readFile(feedScriptPath, 'utf8')
 ]);
 
 assert.doesNotMatch(source, /No tracking|Your answer is anonymous|Share this topic|Test it against your own body|Be one of the first 5/i, 'portal source must not regress to the retired copy');
@@ -170,6 +172,7 @@ const progressSeries = {
 
 function withInjectedConfig(html, origin) {
   const injected = [
+    '<style>#feed-panel{display:none!important}#topics-panel{display:block!important}</style>',
     `<script>window.SOMACHECK_API_BASE = ${JSON.stringify(`${origin}/api`)};`,
     `window.SOMACHECK_INSTALL_URL = ${JSON.stringify(installUrl)};`,
     'window.__wvIntervals = [];',
@@ -257,6 +260,12 @@ async function startPortalServer(options) {
       return;
     }
 
+    if (url.pathname === '/world-vibe/feed.js') {
+      response.writeHead(200, { 'content-type': 'application/javascript; charset=utf-8' });
+      response.end(feedScript);
+      return;
+    }
+
     if (url.pathname === '/world-vibe/' || url.pathname === '/world-vibe') {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       response.end(withInjectedConfig(html, `http://127.0.0.1:${server.address().port}`));
@@ -324,6 +333,7 @@ async function runFixtureFallbackProof(browser) {
 
   try {
     await page.goto(`${origin}/world-vibe/?t=ai-at-work`, { waitUntil: 'networkidle' });
+    await page.locator('#tab-topics').click();
     await page.locator('#topic-ai-at-work').waitFor({ state: 'visible' });
     assert.equal(await page.locator('#topic-ai-at-work .statement').textContent(), 'I feel hopeful about AI at work', 'static fixture array must still normalize into portal statements');
     assert.equal(await page.locator('#topic-ai-at-work [data-role="qr"]').getAttribute('data-payload'), stableShareRoute(origin, 'ai-at-work'), 'static fixture topics must derive the stable share route on the page origin when no public link_url is provided');
@@ -370,6 +380,7 @@ async function runMutationProof(browser) {
 
   try {
     await page.goto(`${origin}/world-vibe/`, { waitUntil: 'networkidle' });
+    await page.locator('#tab-topics').click();
     await page.locator('#topic-gut-vs-dashboard').waitFor({ state: 'visible' });
     let failedAsExpected = false;
     try {
@@ -401,6 +412,7 @@ async function runChallengeRequiredProof(browser) {
 
   try {
     await page.goto(`${origin}/world-vibe/?t=gut-vs-dashboard`, { waitUntil: 'networkidle' });
+    await page.locator('#tab-topics').click();
     await page.locator('#topic-gut-vs-dashboard').waitFor({ state: 'visible' });
     const navigationsBefore = track.navigations.length;
     await page.locator('#topic-gut-vs-dashboard .answer-btn').click();
@@ -563,6 +575,7 @@ async function runSmartRouteProof(browser) {
 
   try {
     await page.goto(portalUrl, { waitUntil: 'networkidle' });
+    await page.locator('#tab-topics').click();
     await page.locator('#topic-gut-vs-dashboard').waitFor({ state: 'visible' });
     const button = page.locator('#topic-gut-vs-dashboard .answer-btn');
     assert.equal(await button.evaluate((node) => node.tagName), 'BUTTON', 'smart route must not pre-render a personal link on load');
@@ -723,6 +736,7 @@ async function runSmartRouteRejectionProof(browser) {
 
   try {
     await page.goto(`${origin}/world-vibe/`, { waitUntil: 'networkidle' });
+    await page.locator('#tab-topics').click();
     for (const [slug, extra] of variants(origin)) {
       await page.locator(`#topic-${slug}`).waitFor({ state: 'visible' });
       const expectedQr = extra.link_url || stableShareRoute(origin, slug);
@@ -772,6 +786,7 @@ async function runFallbackStatusProof(browser) {
 
   try {
     await page.goto(portalUrl, { waitUntil: 'networkidle' });
+    await page.locator('#tab-topics').click();
     for (const [slug, spec] of Object.entries(cases)) {
       await page.locator(`#topic-${slug}`).waitFor({ state: 'visible' });
       const navigationsBefore = track.navigations.length;
@@ -842,6 +857,7 @@ async function runSmartMutationProof(browser) {
 
   try {
     await page.goto(`${origin}/world-vibe/`, { waitUntil: 'networkidle' });
+    await page.locator('#tab-topics').click();
     await page.locator('#topic-gut-vs-dashboard').waitFor({ state: 'visible' });
     const navigationsBefore = track.navigations.length;
     await page.locator('#topic-gut-vs-dashboard .answer-btn').click();
@@ -886,6 +902,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
 
   await page.goto(`${origin}/world-vibe/?t=gut-vs-dashboard`, { waitUntil: 'networkidle' });
+  await page.locator('#tab-topics').click();
   await page.locator('#topic-gut-vs-dashboard').waitFor({ state: 'visible' });
 
   assert.equal(joinRequests.length, 0, 'page load must not issue a join request');

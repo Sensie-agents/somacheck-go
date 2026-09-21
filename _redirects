@@ -1,0 +1,12 @@
+# World Vibe content-item share pages: the three curated topics are static
+# folders (world-vibe/share/<topic>/index.html) and are served as those exact
+# assets before any redirect rule is evaluated, so they keep working
+# unchanged. Every other /world-vibe/share/<slug> falls through to this
+# redirect, which preserves older browser share links while moving them to the
+# canonical item query form.
+#
+# Arbitrary legacy share paths are handled by the matching Pages Function.
+# Pages skips _redirects when a Function route matches. The Function preserves
+# curated static pages and serves the shared item document for a validated
+# arbitrary slug; item.js then replaces the visible URL with the canonical
+# query form.
