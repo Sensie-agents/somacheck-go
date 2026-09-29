@@ -16,14 +16,16 @@ test('contributors 2: dots and "2 of 3", no percent', () => {
   assert.doesNotMatch(html, /%/);
 });
 
-test('lean with aligned=NULL: track, no numbers', () => {
+test('lean with aligned=NULL: track, head count, no percentages', () => {
   const item = fx('item-lean-5.json');
   assert.equal(item.aligned, null);
   assert.equal(item.lean, 'mixed');
   const html = renderMeter(item);
   assert.match(html, /class="track"/);
-  assert.match(html, /Mixed so far/);
-  assert.doesNotMatch(html.replace(/<[^>]+>/g, ' ') , /\d/);
+  const text = html.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ');
+  assert.match(text, /Mixed so far · 5 checked in/);
+  assert.doesNotMatch(text, /%/);
+  assert.doesNotMatch(text.replace('5 checked in', ''), /\d/);
   assert.doesNotMatch(html, /class="dots"/);
 });
 
@@ -33,6 +35,24 @@ test('contributors 12 with counts: percent bar', () => {
   assert.match(html, /75% aligned/);
   assert.match(html, /25% unaligned/);
   assert.match(html, /12 checked in/);
+});
+
+test('raw world_vibe_public_feed_v2 row (contributor_count 12, 9/3) renders the split', () => {
+  const row = { slug: 'raw', quote: null, statement: 'I am ready.', domain: null, source_url: null, contributor_count: 12, unlock_threshold: 3, aligned: 9, unaligned: 3, lean: 'aligned', last_activity_at: '2026-09-29T12:00:00Z', public_signals: 0 };
+  const html = renderMeter(row);
+  assert.match(html, /75% aligned/);
+  assert.match(html, /25% unaligned/);
+  assert.match(html, /12 checked in/);
+});
+
+test('exact-count rule: threshold 20 with 12 contributors shows no split and no lean', () => {
+  const item = { contributor_count: 12, unlock_threshold: 20, aligned: 9, unaligned: 3, lean: 'aligned' };
+  for (const html of [renderMeter(item), renderReveal({ ...item, statement: 'I am ready.' })]) {
+    assert.doesNotMatch(html.replace(/<[^>]+>/g, ''), /%/);
+    assert.doesNotMatch(html, /class="split"/);
+    assert.doesNotMatch(html, /Leans|Mixed so far/);
+    assert.match(html, /12 of 20 checked in/);
+  }
 });
 
 test('curator_name NULL renders no name', () => {
@@ -70,6 +90,10 @@ test('public-signal item shows the label and never a curator name', () => {
   assert.match(html, /Shown publicly by choice/);
   assert.ok(!html.includes(item.curator_name));
   assert.doesNotMatch(html, /Brought by/);
+  const reveal = renderReveal({ ...item, revealed_by_you: false });
+  assert.match(reveal, /Shown publicly by choice/);
+  assert.ok(!reveal.includes(item.curator_name));
+  assert.doesNotMatch(renderReveal({ ...item, publish_after_answer: false }), /Shown publicly by choice/);
 });
 
 test('reveal: revealed_by_you shows YOU REVEALED IT, otherwise YOU\'RE IN', () => {

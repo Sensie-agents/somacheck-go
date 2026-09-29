@@ -33,7 +33,7 @@ export function esc(x) {
 
 const isNum = (v) => typeof v === 'number' && isFinite(v);
 const threshold = (item) => (isNum(item.unlock_threshold) && item.unlock_threshold >= DEFAULT_THRESHOLD ? item.unlock_threshold : DEFAULT_THRESHOLD);
-const contributors = (item) => (isNum(item.contributors) ? item.contributors : 0);
+const contributors = (item) => (isNum(item.contributor_count) ? item.contributor_count : 0);
 
 // Consented public-signal items never carry a curator name, even if one is sent.
 export function visibleCuratorName(item) {
@@ -62,8 +62,9 @@ function dotsHtml(n, t) {
   return d;
 }
 
-// Reveal ladder: under threshold dots and "n of T"; threshold to 9 a lean with
-// no numbers; 10+ with counts a percent bar. publish_after_answer items show
+// Reveal ladder: under threshold dots and "n of T"; at threshold a lean with the
+// head count and no percentages; a percent bar only when contributor_count >= 10
+// AND >= unlock_threshold. publish_after_answer items show
 // the consented readings they carry.
 export function renderMeter(item) {
   const c = contributors(item);
@@ -79,7 +80,7 @@ export function renderMeter(item) {
   if (c < t) {
     return '<div class="meter"><span class="meter-row meter-gather"><span class="dots" aria-hidden="true">' + dotsHtml(c, t) + '</span><span>' + c + ' of ' + t + ' checked in · reveals at ' + t + '</span></span></div>';
   }
-  if (c >= EXACT_COUNT_FROM && hasCounts) {
+  if (c >= EXACT_COUNT_FROM && c >= t && hasCounts) {
     const total = item.aligned + item.unaligned;
     const pct = Math.round((item.aligned / total) * 100);
     return '<div class="meter"><span class="meter-row"><b class="tone-aligned">' + pct + '% aligned</b><b class="tone-unaligned">' + (100 - pct) + '% unaligned</b></span>' +
@@ -90,7 +91,7 @@ export function renderMeter(item) {
   if (!tone) {
     return '<div class="meter"><span class="meter-row"><span>The vibe is still forming</span></span></div>';
   }
-  return '<div class="meter"><span class="meter-row"><b style="color:' + tone[1] + '">' + tone[0] + '</b><span>A few checked in</span></span>' +
+  return '<div class="meter"><span class="meter-row"><b style="color:' + tone[1] + '">' + tone[0] + '</b><span>&nbsp;· ' + c + ' checked in</span></span>' +
     '<span class="track" aria-hidden="true"><i style="left:' + tone[3] + ';border-color:' + tone[2] + '"></i></span>' +
     '<span class="ends" aria-hidden="true"><span>ALIGNED</span><span>UNALIGNED</span></span></div>';
 }
@@ -133,6 +134,7 @@ export function renderReveal(progress) {
     '<span class="reveal-head">' + (revealed ? 'YOU REVEALED IT' : "YOU'RE IN") + '</span>' +
     '<p class="thanks">' + (revealed ? 'Your check-in unlocked the vibe.' : 'Thanks. The room just got one body clearer.') + '</p>' +
     '<p class="echo">' + esc(progress.statement) + '</p>' +
+    (progress.publish_after_answer ? '<div class="by"><span class="public-label">' + PUBLIC_SIGNAL_LABEL + '</span></div>' : '') +
     renderMeter(progress) +
     '<p class="fine left">Your own reading is in your SomaCheck app. Here you only ever see the room, never who.</p>' +
     '<button class="btn-main" type="button" data-act="next">One more?</button>' +
