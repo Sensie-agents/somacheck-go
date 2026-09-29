@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>World Vibe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="home.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <a class="brand" href="/world-vibe/">
+      <svg class="mark" width="30" height="30" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="23.18" fill="none" stroke="#12A594" stroke-width="3.9"/><circle cx="32" cy="32" r="10.7" fill="#F4B26B"/></svg>
+      <strong>World Vibe</strong>
+    </a>
+    <a class="nav-link" href="/world-vibe/">Explore</a>
+    <a class="get" id="get-app" href="https://testflight.apple.com/join/C4mAH3zz" target="_blank" rel="noopener">Get SomaCheck</a>
+  </div>
+</header>
+
+<main class="stage">
+  <h1 class="sr">World Vibe</h1>
+  <div class="lanes" role="tablist" aria-label="What to check">
+    <button type="button" role="tab" id="tab-shared" aria-controls="slot" data-lane="shared" aria-selected="true">With everyone</button>
+    <button type="button" role="tab" id="tab-private" aria-controls="slot" data-lane="private" aria-selected="false">Just for me</button>
+  </div>
+  <div id="slot" class="stage-slot" role="tabpanel" aria-labelledby="tab-shared"></div>
+  <button class="how-link" type="button" data-open="how">How it works</button>
+</main>
+
+<footer class="foot"><span>Part of SomaCheck research trials in measurable resilience.</span><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="/support/">Support</a></footer>
+
+<div class="scrim" id="scrim" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" id="sheet"></div>
+</div>
+
+<script src="../config.js"></script>
+<script type="module" src="home.js"></script>
+</body>
+</html>

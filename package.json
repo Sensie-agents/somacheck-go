@@ -1,0 +1,7 @@
+{
+  "name": "somacheck-go",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/wv3-home-render.test.mjs"
+  }
+}
