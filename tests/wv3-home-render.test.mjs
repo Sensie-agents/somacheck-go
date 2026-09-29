@@ -38,7 +38,7 @@ test('contributors 12 with counts: percent bar', () => {
 });
 
 test('raw world_vibe_public_feed_v2 row (contributor_count 12, 9/3) renders the split', () => {
-  const row = { slug: 'raw', quote: null, statement: 'I am ready.', domain: null, source_url: null, contributor_count: 12, unlock_threshold: 3, aligned: 9, unaligned: 3, lean: 'aligned', last_activity_at: '2026-09-29T12:00:00Z', public_signals: 0 };
+  const row = { slug: 'raw', quote: null, statement: 'I am ready.', domain: null, source_url: null, contributor_count: 12, unlock_threshold: 3, aligned: 9, unaligned: 3, lean: 'aligned', last_activity_at: '2026-09-29T12:00:00Z', public_signals: false };
   const html = renderMeter(row);
   assert.match(html, /75% aligned/);
   assert.match(html, /25% unaligned/);
@@ -93,7 +93,19 @@ test('public-signal item shows the label and never a curator name', () => {
   const reveal = renderReveal({ ...item, revealed_by_you: false });
   assert.match(reveal, /Shown publicly by choice/);
   assert.ok(!reveal.includes(item.curator_name));
-  assert.doesNotMatch(renderReveal({ ...item, publish_after_answer: false }), /Shown publicly by choice/);
+  assert.doesNotMatch(renderReveal({ ...item, public_signals: false }), /Shown publicly by choice/);
+});
+
+test('raw v2 public-signal row: consented counts, label on card and reveal, no curator name', () => {
+  const row = { slug: 'raw-ps', quote: null, statement: 'I feel calm.', domain: null, source_url: null, contributor_count: 1, unlock_threshold: 1, aligned: 1, unaligned: 0, lean: 'aligned', last_activity_at: null, public_signals: true, reason: 'most_checked', category: 'self', curator_name: 'Should Not Show' };
+  const card = renderSharedCard(row);
+  assert.match(card, /Shown publicly by choice/);
+  assert.match(card, /100%/);
+  assert.doesNotMatch(card, /1 of 3/);
+  assert.ok(!card.includes('Should Not Show'));
+  const reveal = renderReveal({ ...row, contributor_count: 12, aligned: 9, unaligned: 3, revealed_by_you: false });
+  assert.match(reveal, /Shown publicly by choice/);
+  assert.ok(!reveal.includes('Should Not Show'));
 });
 
 test('reveal: revealed_by_you shows YOU REVEALED IT, otherwise YOU\'RE IN', () => {

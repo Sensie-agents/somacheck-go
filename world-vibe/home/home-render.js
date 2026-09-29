@@ -37,7 +37,7 @@ const contributors = (item) => (isNum(item.contributor_count) ? item.contributor
 
 // Consented public-signal items never carry a curator name, even if one is sent.
 export function visibleCuratorName(item) {
-  if (item.publish_after_answer) return null;
+  if (item.public_signals === true) return null;
   const n = typeof item.curator_name === 'string' ? item.curator_name.trim() : '';
   return n || null;
 }
@@ -64,14 +64,14 @@ function dotsHtml(n, t) {
 
 // Reveal ladder: under threshold dots and "n of T"; at threshold a lean with the
 // head count and no percentages; a percent bar only when contributor_count >= 10
-// AND >= unlock_threshold. publish_after_answer items show
+// AND >= unlock_threshold. public_signals items show
 // the consented readings they carry.
 export function renderMeter(item) {
   const c = contributors(item);
   const t = threshold(item);
   const hasCounts = isNum(item.aligned) && isNum(item.unaligned) && item.aligned + item.unaligned > 0;
 
-  if (item.publish_after_answer && hasCounts) {
+  if (item.public_signals === true && hasCounts) {
     const total = item.aligned + item.unaligned;
     const pct = Math.round((item.aligned / total) * 100);
     return '<div class="meter"><span class="meter-row"><b class="tone-aligned">' + pct + '% aligned</b><span>' + total + ' shared by choice</span></span>' +
@@ -108,7 +108,7 @@ function tint(name) {
 function byLine(pick) {
   const name = visibleCuratorName(pick);
   const src = pick.domain ? '<span class="src">' + (name ? '· ' : '') + esc(pick.domain) + '</span>' : '';
-  const label = pick.publish_after_answer ? '<span class="public-label">' + PUBLIC_SIGNAL_LABEL + '</span>' : '';
+  const label = pick.public_signals === true ? '<span class="public-label">' + PUBLIC_SIGNAL_LABEL + '</span>' : '';
   if (!name && !src && !label) return '';
   const who = name
     ? '<span class="av" style="background:' + tint(name) + '" aria-hidden="true">' + esc(initials(name)) + '</span><span>Brought by <b>' + esc(name) + '</b></span>'
@@ -134,7 +134,7 @@ export function renderReveal(progress) {
     '<span class="reveal-head">' + (revealed ? 'YOU REVEALED IT' : "YOU'RE IN") + '</span>' +
     '<p class="thanks">' + (revealed ? 'Your check-in unlocked the vibe.' : 'Thanks. The room just got one body clearer.') + '</p>' +
     '<p class="echo">' + esc(progress.statement) + '</p>' +
-    (progress.publish_after_answer ? '<div class="by"><span class="public-label">' + PUBLIC_SIGNAL_LABEL + '</span></div>' : '') +
+    (progress.public_signals === true ? '<div class="by"><span class="public-label">' + PUBLIC_SIGNAL_LABEL + '</span></div>' : '') +
     renderMeter(progress) +
     '<p class="fine left">Your own reading is in your SomaCheck app. Here you only ever see the room, never who.</p>' +
     '<button class="btn-main" type="button" data-act="next">One more?</button>' +
