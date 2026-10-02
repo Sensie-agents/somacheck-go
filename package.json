@@ -2,6 +2,7 @@
   "name": "somacheck-go",
   "private": true,
   "scripts": {
-    "test": "node --test tests/wv3-home-render.test.mjs"
+    "test": "node --test tests/wv3-home-render.test.mjs tests/wv3-explore-render.test.mjs",
+    "test:browser": "node tests/wv3-explore-browser.test.mjs"
   }
 }
