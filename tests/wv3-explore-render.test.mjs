@@ -217,10 +217,10 @@ function node(attrs, parent = null) {
 test('focus restore keys on the stable list container, never an id-less parent', () => {
   const feed = node({ id: 'feed' });
   const wrap = node({}, feed);
-  assert.equal(focusSelector(node({ dataset: { retry: 'feed' } }, wrap)), '#feed [data-more], #feed [data-retry]');
+  assert.equal(focusSelector(node({ dataset: { retry: 'feed' } }, wrap)), '#feed [data-more], #feed [data-retry], #end [data-more], #end [data-retry]');
   const end = node({ id: 'end' });
-  assert.equal(focusSelector(node({ dataset: { retry: 'more' } }, end)), '#end [data-more], #end [data-retry]');
-  assert.equal(focusSelector(node({ more: true }, end)), '#end [data-more], #end [data-retry]');
+  assert.equal(focusSelector(node({ dataset: { retry: 'more' } }, end)), '#feed [data-more], #feed [data-retry], #end [data-more], #end [data-retry]');
+  assert.equal(focusSelector(node({ more: true }, end)), '#feed [data-more], #feed [data-retry], #end [data-more], #end [data-retry]');
   const strip = node({ id: 'strip' });
   assert.equal(focusSelector(node({ dataset: { who: 'abc' } }, strip)), '#strip [data-who="abc"]');
   assert.equal(focusSelector(node({}, end)), null);
@@ -250,6 +250,14 @@ test('focus moves from Load more to Try again on the first failure, and stays on
   // A retry that succeeds hands focus back to Load more when pages remain.
   const more = { root: 'end', attr: 'data-more' };
   assert.equal(pageWith(more).querySelector(keep2), more);
+});
+
+test('first failure with an empty filter renders Try again in #feed: focus still restores', () => {
+  const end = node({ id: 'end' });
+  const keep = focusSelector(node({ more: true }, end));
+  // Load more lived in #end; the failed continuation rendered Try again in #feed.
+  const tryAgainInFeed = { root: 'feed', attr: 'data-retry' };
+  assert.equal(pageWith(tryAgainInFeed).querySelector(keep), tryAgainInFeed);
 });
 
 test('explore.js wires the shared failure handling and the focus restore', () => {

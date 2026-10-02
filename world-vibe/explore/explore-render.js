@@ -97,9 +97,11 @@ export function focusSelector(el) {
   }
   const m = el.closest('[data-more],[data-retry]');
   if (m) {
-    const root = m.closest('#feed, #end');
-    // Load more turns into Try again (and back) in place, so match either.
-    return root ? '#' + root.id + ' [data-more], #' + root.id + ' [data-retry]' : null;
+    if (!m.closest('#feed, #end')) return null;
+    // Load more turns into Try again (and back), and a failed continuation
+    // renders Try again in #feed when the filter has no rows, so match the
+    // control in either stable container.
+    return '#feed [data-more], #feed [data-retry], #end [data-more], #end [data-retry]';
   }
   return null;
 }
