@@ -17,6 +17,7 @@ export function createFlow({ api, fetchFn, getToken, tz = 'UTC', arrivedFrom = n
   };
   let gen = 0;
   let pickSeq = 0;
+  let consentSeq = 0;   // reads and writes share it: only the newest request may set st.consent
   let pollTimer = null;
 
   const currentLine = () => (st.drafts.length ? st.drafts[st.didx % st.drafts.length] : null);
@@ -125,8 +126,9 @@ export function createFlow({ api, fetchFn, getToken, tz = 'UTC', arrivedFrom = n
 
   async function loadConsent() {
     const still = signedGen();
+    const seq = ++consentSeq;
     const r = await getConsent(fetchFn, api, getToken());
-    if (!still()) return;
+    if (!still() || seq !== consentSeq) return;
     st.consent = r.consent;
     st.perror = r.error && r.error !== 'signin' ? 'consent_unavailable' : null;
     if (st.lane === 'private') ui.render();
@@ -134,8 +136,9 @@ export function createFlow({ api, fetchFn, getToken, tz = 'UTC', arrivedFrom = n
 
   async function toggleConsent(want) {
     const still = signedGen();
+    const seq = ++consentSeq;
     const r = await setConsent(fetchFn, api, getToken(), want);
-    if (!still()) return;
+    if (!still() || seq !== consentSeq) return;
     if (r.consent === null) {
       st.perror = r.error === 'signin' ? null : 'consent_unavailable';
       if (r.error === 'signin') await ui.signOut();

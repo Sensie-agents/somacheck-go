@@ -204,3 +204,152 @@ test('signed out: nothing personal is requested while opening the check sheet', 
   assert.equal(h.st.phoneLinked, null);
   assert.ok(h.calls.every((c) => !(c.init.headers || {}).Authorization));
 });
+
+// One test per async path for the stale guards (see the mutant table in the
+// WP12 receipt): each drops its response when sign-out, the lane, the item or a
+// newer request got there first.
+const PICK2 = pickEnvelope('most_checked', { slug: 'pick-two', statement: 'I feel ready for Monday.' });
+const ASK1 = 'POST /v1/me/world-vibe/items/pick-one/ask';
+const PROGRESS1 = 'GET /v1/public/world-vibe/items/pick-one/progress';
+const CONSENT_GET = 'GET /v1/me/world-vibe/consent';
+const CONSENT_PUT = 'PUT /v1/me/world-vibe/consent';
+const DRAFTS = 'POST /v1/me/vibecheck/drafts';
+const sent = res(201, { request_id: RECEIPT, question: 'q', delivery: 'app_push', replayed: false });
+
+test('pick: an older pick response arriving after a newer one is dropped', async () => {
+  let n = 0;
+  const h = harness({ routes: { 'GET /v1/public/world-vibe/pick': () => (++n === 1 ? { hold: res(200, PICK) } : res(200, PICK2)) } });
+  const first = h.flow.showPick(); await flush();
+  await h.flow.showPick();
+  assert.equal(h.st.pick.slug, 'pick-two');
+  await h.release('GET /v1/public/world-vibe/pick');
+  await first;
+  assert.equal(h.st.pick.slug, 'pick-two', 'the stale pick does not replace the newer one');
+});
+
+test('pick: a pick that resolves after sign-out is dropped', async () => {
+  const h = harness({ routes: { 'GET /v1/public/world-vibe/pick': { hold: res(200, PICK) } } });
+  const loading = h.flow.showPick(); await flush();
+  h.signOut();
+  await h.release('GET /v1/public/world-vibe/pick');
+  await loading;
+  assert.equal(h.st.pick, null);
+});
+
+test('consent read: a delayed GET never overwrites a newer successful PUT', async () => {
+  const h = harness({ routes: { ...base, [CONSENT_GET]: { hold: res(200, consentBody(true)) }, [CONSENT_PUT]: res(200, consentBody(false)) } });
+  h.st.consent = null;
+  h.flow.selectLane('private'); await flush();       // GET in flight, answer will say true
+  await h.flow.toggleConsent(false);                 // the person turns it off; the PUT wins
+  assert.equal(h.st.consent, false);
+  await h.release(CONSENT_GET);
+  assert.equal(h.st.consent, false, 'the older read must not switch consent back on');
+});
+
+test('consent write: a PUT that resolves after sign-out is dropped', async () => {
+  const h = harness({ routes: { ...base, [CONSENT_PUT]: { hold: res(200, consentBody(true)) } } });
+  const writing = h.flow.toggleConsent(true); await flush();
+  h.signOut();
+  await h.release(CONSENT_PUT);
+  await writing;
+  assert.equal(h.st.consent, null);
+});
+
+test('consent write: of two writes the newer one decides, even when the older resolves last', async () => {
+  const gates = [];
+  const h = harness({ routes: { ...base, [CONSENT_PUT]: () => new Promise((resolve) => gates.push(resolve)) } });
+  const a = h.flow.toggleConsent(true); await flush();
+  const b = h.flow.toggleConsent(false); await flush();
+  gates[1](res(200, consentBody(false))); await flush();   // the newer write answers first
+  gates[0](res(200, consentBody(true))); await flush();    // the older one lands late
+  await Promise.all([a, b]);
+  assert.equal(h.st.consent, false);
+});
+
+test('shared send: a send that resolves after the item moved on does not set the receipt or start polling', async () => {
+  const h = harness({ routes: {
+    'GET /v1/public/world-vibe/pick': (init, u) => res(200, u.searchParams.get('exclude') ? PICK2 : PICK),
+    [ASK1]: { hold: sent }
+  } });
+  await h.flow.showPick();
+  const sending = h.flow.sendShared(); await flush();
+  await h.flow.skip();
+  await h.release(ASK1);
+  await sending;
+  assert.equal(h.st.receipt, null);
+  assert.equal(h.st.sent, false);
+  assert.equal(h.timers.length, 0, 'no poll starts for an abandoned item');
+});
+
+test('shared send: a send that resolves after sign-out does not set the receipt or start polling', async () => {
+  const h = harness({ routes: { ...base, [ASK1]: { hold: sent } } });
+  await h.flow.showPick();
+  const sending = h.flow.sendShared(); await flush();
+  h.signOut();
+  await h.release(ASK1);
+  await sending;
+  assert.equal(h.st.receipt, null);
+  assert.equal(h.st.sent, false);
+  assert.equal(h.timers.length, 0);
+});
+
+test('poll: a tick that fires after sign-out asks for nothing', async () => {
+  const h = harness({ routes: { ...base, [ASK1]: sent, [PROGRESS1]: res(200, progressEnvelope({ slug: 'pick-one' })) } });
+  await h.flow.showPick();
+  await h.flow.sendShared();
+  assert.equal(h.timers.length, 1);
+  h.signOut();
+  await h.timers[0]();
+  assert.equal(h.count(PROGRESS1), 0);
+  assert.equal(h.timers.length, 1, 'the dead poll does not reschedule');
+});
+
+test('progress: a response that resolves after the lane moved to private is dropped', async () => {
+  const h = harness({ routes: { ...base, [ASK1]: sent, [PROGRESS1]: { hold: res(200, progressEnvelope({ slug: 'pick-one', revealed_by_you: true, your_reading: 'aligned' })) } } });
+  await h.flow.showPick();
+  await h.flow.sendShared();
+  const checking = h.flow.checkProgress(); await flush();
+  h.flow.selectLane('private');
+  await h.release(PROGRESS1);
+  assert.equal(await checking, false);
+  assert.equal(h.st.progress, null);
+  assert.equal(h.st.phase, 'card');
+});
+
+test('drafts: a generate that resolves after the lane moved on does not store the drafts', async () => {
+  const h = harness({ routes: { ...base, [DRAFTS]: { hold: res(200, { drafts: [{ id: DRAFT, statement: 'I need a real break.' }] }) } } });
+  await h.flow.showPick();
+  h.flow.selectLane('private');
+  h.st.consent = true; h.st.pctx = 'words';
+  const generating = h.flow.generate('a deadline'); await flush();
+  h.flow.selectLane('shared');
+  await h.release(DRAFTS);
+  await generating;
+  assert.deepEqual(h.st.drafts, []);
+  assert.equal(h.st.generated, false);
+});
+
+test('private ask: an ask that resolves after sign-out does not mark the line sent', async () => {
+  const ASK = 'POST /v1/me/vibecheck/drafts/' + DRAFT + '/ask';
+  const h = harness({ routes: { ...base, [ASK]: { hold: res(201, { request_id: 'rq-9', source: 'world_vibe_private', status: 'pending' }) } } });
+  await h.flow.showPick();
+  h.flow.selectLane('private');
+  h.st.drafts = [{ id: DRAFT, statement: 'I need a real break.' }]; h.st.generated = true;
+  const asking = h.flow.sendPrivate(); await flush();
+  h.signOut();
+  await h.release(ASK);
+  await asking;
+  assert.equal(h.st.sent, false);
+  assert.equal(h.st.sendError, null);
+});
+
+test('poll: a tick that fires after a lane switch ends the poll instead of rescheduling', async () => {
+  const h = harness({ routes: { ...base, [ASK1]: sent, [PROGRESS1]: res(200, progressEnvelope({ slug: 'pick-one' })) } });
+  await h.flow.showPick();
+  await h.flow.sendShared();
+  assert.equal(h.timers.length, 1);
+  h.flow.selectLane('private');
+  await h.timers[0]();
+  assert.equal(h.count(PROGRESS1), 0);
+  assert.equal(h.timers.length, 1, 'a poll from the shared lane does not keep ticking in the private lane');
+});
