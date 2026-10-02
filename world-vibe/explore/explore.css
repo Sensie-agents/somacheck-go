@@ -134,3 +134,14 @@ button{font:inherit;color:inherit;cursor:pointer}
 .btn-main{height:58px;border:0;border-radius:16px;background:var(--em-deep);color:#FFFFFF;font-size:17px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:10px;width:100%}
 .fine{margin:0;font-size:13px;line-height:1.55;color:var(--ink3);text-align:center}
 .status{min-height:20px;text-align:center;font-size:14px;font-weight:700;color:var(--em-deep)}
+
+/* topic of the week */
+.totw{margin-block:16px 8px;background:var(--surface);border-radius:28px;padding:clamp(24px,6vw,36px);box-shadow:0 1px 2px rgba(22,24,27,.05),0 18px 48px rgba(22,24,27,.08);display:flex;flex-direction:column;gap:22px}
+.eyebrow{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:var(--amber-deep)}
+.eyebrow i{width:8px;height:8px;border-radius:50%;background:var(--amber);display:block}
+.totw h2{margin:0;font-family:var(--serif);font-weight:500;font-size:clamp(32px,7vw,44px);line-height:1.12;letter-spacing:-.02em;text-wrap:balance}
+.totw .public-label{align-self:flex-start}
+.progress{display:flex;align-items:center;gap:12px;font-size:15px;color:var(--ink2)}
+.progress b{color:var(--ink)}
+.dots.big i{width:13px;height:13px;border-width:2px}
+.micro{margin:-8px 0 0;text-align:center;font-size:13px;color:var(--ink3)}

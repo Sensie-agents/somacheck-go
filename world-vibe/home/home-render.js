@@ -32,8 +32,8 @@ export function esc(x) {
 }
 
 const isNum = (v) => typeof v === 'number' && isFinite(v);
-const threshold = (item) => (isNum(item.unlock_threshold) && item.unlock_threshold >= DEFAULT_THRESHOLD ? item.unlock_threshold : DEFAULT_THRESHOLD);
-const contributors = (item) => (isNum(item.contributor_count) ? item.contributor_count : 0);
+export const threshold = (item) => (isNum(item.unlock_threshold) && item.unlock_threshold >= DEFAULT_THRESHOLD ? item.unlock_threshold : DEFAULT_THRESHOLD);
+export const contributors = (item) => (isNum(item.contributor_count) ? item.contributor_count : 0);
 
 // Consented public-signal items never carry a curator name, even if one is sent.
 export function visibleCuratorName(item) {

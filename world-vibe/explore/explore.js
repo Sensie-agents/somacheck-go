@@ -1,11 +1,12 @@
-import { selectItems, renderFeed, renderFilterText, renderCuratorList, renderStrip, renderSteps } from './explore-render.js';
+import { selectItems, renderFeed, renderFilterText, renderCuratorList, renderStrip, renderSteps, renderHero } from './explore-render.js';
+import { DEFAULT_API, loadFeed, loadCurators, loadFeatured, loadFollowing } from './explore-data.js';
 
-// WP10 runs on fixtures that carry the exact columns of feed_v3, following_feed
-// and public_curators. Wiring to live routes replaces load() only.
-const getJson = (name) => fetch('fixtures/' + name).then((r) => r.json());
+const API = window.SOMACHECK_API_BASE || DEFAULT_API;
+const call = (url) => fetch(url);
 
 const st = { tab: 'all', curator: null };
-const data = { feed: [], following: [], curators: [], followingError: null };
+const data = { feed: [], following: [], curators: [], featured: null, feedError: false, followingError: null };
+let followingLoaded = false;
 
 const $ = (id) => document.getElementById(id);
 let lastFocus = null;
@@ -17,7 +18,9 @@ function render() {
   $('cur-list').innerHTML = renderCuratorList(data.curators, st);
   $('strip').innerHTML = renderStrip(data.curators, st);
   $('filter').hidden = !st.curator;
-  $('filter-text').textContent = renderFilterText(st);
+  $('filter-text').textContent = renderFilterText(st, data.curators);
+  $('hero').innerHTML = renderHero(data.featured);
+  $('hero').hidden = !$('hero').innerHTML;
   $('end').hidden = selectItems(st, data).length === 0;
 }
 
@@ -39,7 +42,14 @@ document.addEventListener('click', (e) => {
   const w = e.target.closest('[data-who]');
   if (w) { st.curator = st.curator === w.dataset.who ? null : w.dataset.who; render(); return; }
   const t = e.target.closest('[data-tab]');
-  if (t) { st.tab = t.dataset.tab; st.curator = null; render(); return; }
+  if (t) {
+    st.tab = t.dataset.tab; st.curator = null; render();
+    if (st.tab === 'following' && !followingLoaded) {
+      followingLoaded = true;
+      loadFollowing(call, API).then((r) => { data.following = r.items; data.followingError = r.error; render(); });
+    }
+    return;
+  }
   if (e.target === $('scrim')) closeSheet();
 });
 $('clear').addEventListener('click', () => { st.curator = null; render(); });
@@ -57,10 +67,12 @@ $('scrim').addEventListener('keydown', (e) => {
 async function load() {
   if (window.SOMACHECK_INSTALL_URL) $('get-app').href = window.SOMACHECK_INSTALL_URL;
   document.querySelectorAll('[data-steps]').forEach((el) => { el.innerHTML = renderSteps(); });
-  const [feed, following, curators] = await Promise.all([getJson('feed-v3.json'), getJson('following-feed.json'), getJson('curators.json')]);
-  data.feed = feed.items;
-  data.following = following.items;
-  data.curators = curators;
+  // Each surface fails on its own: a missing hero or curator list never blanks the feed.
+  const [feed, curators, featured] = await Promise.allSettled([loadFeed(call, API), loadCurators(call, API), loadFeatured(call, API)]);
+  data.feedError = feed.status === 'rejected';
+  data.feed = feed.status === 'fulfilled' ? feed.value : [];
+  data.curators = curators.status === 'fulfilled' ? curators.value : [];
+  data.featured = featured.status === 'fulfilled' ? featured.value : null;
   render();
 }
 
