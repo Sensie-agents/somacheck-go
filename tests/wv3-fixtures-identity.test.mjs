@@ -24,6 +24,11 @@ test('every captured fixture is byte-identical to its recorded capture', () => {
   }
 });
 
+// The backend lane drops these two captures in when they exist; tests/helpers/captured.mjs
+// then replays them unchanged. Any other extra file is a hand-written fixture.
+const PENDING_CAPTURES = ['wv3_consent.json', 'wv3_phone.json'];
+
 test('no fixture exists that is not a recorded capture', () => {
-  assert.deepEqual(readdirSync(fixturesDir).sort(), Object.keys(SHA256).sort());
+  const extra = readdirSync(fixturesDir).filter((n) => !(n in SHA256));
+  assert.deepEqual(extra.filter((n) => !PENDING_CAPTURES.includes(n)), []);
 });

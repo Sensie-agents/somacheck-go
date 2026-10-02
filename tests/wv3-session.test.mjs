@@ -216,3 +216,9 @@ test('session.js reads a publishable key from config and nothing in the repo har
     assert.doesNotMatch(readFileSync(f, 'utf8'), /eyJ[A-Za-z0-9_-]{20,}\./, f);
   }
 });
+
+test('config.js ships the publishable key (public by design) and no secret of any kind', () => {
+  const cfg = readFileSync(path.join(root, 'world-vibe', 'config.js'), 'utf8');
+  assert.match(cfg, /SOMACHECK_SUPABASE_PUBLISHABLE_KEY = window\.SOMACHECK_SUPABASE_PUBLISHABLE_KEY \|\| 'sb_publishable_af-lUNI2FqEcb-oGy-4uxQ_cnm6kY85'/);
+  assert.doesNotMatch(cfg, /sb_secret_|service_role|eyJ[A-Za-z0-9_-]{20,}/);
+});

@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pickEnvelope, progressEnvelope } from './helpers/captured.mjs';
+import { pickEnvelope, progressEnvelope, consentBody, phoneBody, itemRow } from './helpers/captured.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || '/opt/homebrew/lib/node_modules/playwright');
@@ -46,13 +46,14 @@ const check = async (name, fn) => {
   try { await fn(); console.log('ok - ' + name); } catch (e) { failed++; console.log('not ok - ' + name + '\n' + e.stack); }
 };
 
-// opts: signedIn, key (default KEY), link (true: ask succeeds, false: 422), consent (initial), draftsStatus,
+// opts: signedIn, key (default KEY; 'default' leaves the shipped config.js key alone; '' serves a config.js without one), linked (phone route, default true), item (item route status or body), link (true: ask succeeds, false: 422), consent (initial), draftsStatus,
 //       progress (array of bodies served in order), pageUrl, picks
 async function open(width, opts = {}) {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
-  const log = { api: [], sb: [], pickUrls: [], asks: [], drafts: [], draftAsks: [], progress: [], consentWrites: [], otp: [], logout: [], exchange: [] };
+  const log = { api: [], sb: [], pickUrls: [], asks: [], drafts: [], draftAsks: [], progress: [], consentWrites: [], phone: [], items: [], otp: [], logout: [], exchange: [] };
   let consent = opts.consent === true;
+  log.consentReads = [];
   let progressCalls = 0;
   let pickCalls = 0;
   await page.route(API + '/**', async (route) => {
@@ -78,6 +79,23 @@ async function open(width, opts = {}) {
       return json(route, { drafts: LINES.map((statement, i) => ({ id: i === 0 ? DRAFT : '55555555-5555-4555-8555-55555555555' + i, statement })) });
     }
     if (/^\/v1\/me\/vibecheck\/drafts\/[^/]+\/ask$/.test(u.pathname)) { log.draftAsks.push({ path: u.pathname, auth: headers.authorization }); return json(route, { request_id: 'rq-private', source: 'world_vibe_private', status: 'pending' }, 201); }
+    if (u.pathname === '/v1/me/world-vibe/consent') {
+      if (!headers.authorization) return json(route, { error: 'unauthorized' }, 401);
+      if (req.method() === 'PUT') { const b = JSON.parse(req.postData()); log.consentWrites.push({ body: b, headers }); consent = b.world_vibe_private; return json(route, consentBody(consent)); }
+      log.consentReads.push({ headers });
+      return json(route, consentBody(consent));
+    }
+    if (u.pathname === '/v1/me/world-vibe/phone') {
+      log.phone.push(headers.authorization);
+      if (!headers.authorization) return json(route, { error: 'unauthorized' }, 401);
+      return json(route, phoneBody(opts.linked !== false));
+    }
+    if (u.pathname.startsWith('/v1/public/world-vibe/items/') && !u.pathname.endsWith('/progress')) {
+      log.items.push({ path: u.pathname, auth: headers.authorization });
+      const it = opts.item;
+      if (typeof it === 'number') return json(route, { error: 'x' }, it);
+      return json(route, it || itemRow({ slug: decodeURIComponent(u.pathname.split('/').pop()) }));
+    }
     if (u.pathname === '/v1/public/world-vibe/feed') return json(route, { items: [pickEnvelope('x', { slug: 'f-1' }).item], next_cursor: null });
     if (u.pathname === '/v1/public/world-vibe/curators') return json(route, { curators: [] });
     if (u.pathname === '/v1/public/world-vibe/featured') return json(route, { featured: null });
@@ -92,16 +110,13 @@ async function open(width, opts = {}) {
     if (u.pathname === '/auth/v1/otp') { log.otp.push({ body: JSON.parse(req.postData()), url: u.search, headers }); return json(route, {}); }
     if (u.pathname === '/auth/v1/token') { log.exchange.push(JSON.parse(req.postData())); return json(route, { access_token: 'tok-new', refresh_token: 'r-new', expires_in: 3600, user: { id: 'u-1', email: 'me@x.test' } }); }
     if (u.pathname === '/auth/v1/logout') { log.logout.push(headers.authorization); return json(route, {}); }
-    if (u.pathname === '/rest/v1/user_context_consent') {
-      if (req.method() === 'POST') { const b = JSON.parse(req.postData()); log.consentWrites.push({ body: b, headers }); consent = b.world_vibe_private; return json(route, [{ world_vibe_private: consent }], 201); }
-      return json(route, [{ world_vibe_private: consent }]);
-    }
     return route.fulfill({ status: 404 });
   });
+  if (opts.key === '') await page.route(ORIGIN + '/world-vibe/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: "window.SOMACHECK_INSTALL_URL = 'https://testflight.apple.com/join/x';" }));
   await page.addInitScript(({ api, sb, key, signedIn }) => {
     window.SOMACHECK_API_BASE = api;
     window.SOMACHECK_SUPABASE_URL = sb;
-    if (key) window.SOMACHECK_SUPABASE_PUBLISHABLE_KEY = key;
+    if (key && key !== 'default') window.SOMACHECK_SUPABASE_PUBLISHABLE_KEY = key;
     if (signedIn && !localStorage.getItem('wv.session')) localStorage.setItem('wv.session', JSON.stringify({ access_token: 'tok-abc', refresh_token: 'r', expires_at: Math.floor(Date.now() / 1000) + 86400, user_id: 'u-1', email: 'me@x.test' }));
   }, { api: API, sb: SB, key: opts.key === undefined ? KEY : opts.key, signedIn: opts.signedIn });
   const errors = [];
@@ -266,13 +281,14 @@ await check('private lane signed out: sign-in prompt, no drafts call, no consent
   assert.equal(await page.locator('[data-act="generate"]').count(), 0);
   assert.equal(await page.locator('#slot [data-open="signin"]').count(), 1);
   assert.equal(log.drafts.length, 0);
-  assert.equal(log.sb.filter((r) => r.url.includes('user_context_consent')).length, 0);
+  assert.equal(log.consentReads.length + log.phone.length, 0);
+  assert.equal(log.sb.length, 0);
   await page.close();
 });
 
-await check('private lane, consent off: Write my line is disabled and the page never calls /vibecheck/drafts', async () => {
+await check('private lane, consent off: the agent source is disabled and never calls /vibecheck/drafts; words still writes', async () => {
   const { page, log } = await open(420, { signedIn: true, consent: false });
-  const read = page.waitForResponse(/user_context_consent/);
+  const read = page.waitForResponse(/world-vibe\/consent/);
   await page.locator('#tab-private').click();
   await read;
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
@@ -283,12 +299,14 @@ await check('private lane, consent off: Write my line is disabled and the page n
   await page.locator('[data-act="generate"]').click();
   await page.waitForSelector('[role="alert"]');
   assert.match(await page.locator('[role="alert"]').textContent(), /Turn on the setting below/);
+  assert.equal(log.drafts.length, 0, 'the agent source made no request');
   await page.locator('[data-ctx="words"]').click();
+  assert.equal(await page.locator('[data-act="generate"]').isDisabled(), false, 'words does not wait for consent');
   await page.locator('#mind').fill('a deadline');
-  await page.evaluate(() => { document.querySelector('[data-act="generate"]').disabled = false; });
   await page.locator('[data-act="generate"]').click();
-  await page.waitForSelector('[role="alert"]');
-  assert.equal(log.drafts.length, 0);
+  await page.waitForSelector('#slot .line:not(.small)');
+  assert.deepEqual(log.drafts, [{ body: { source: 'words', words: 'a deadline' }, auth: 'Bearer tok-abc' }]);
+  assert.equal(log.consentWrites.length, 0, 'consent was never switched on');
   await page.close();
 });
 
@@ -299,11 +317,9 @@ await check('consent toggle round-trips through the API, then drafts are request
   await page.locator('#consent').check();
   await page.waitForFunction(() => document.getElementById('consent').checked && !document.querySelector('[data-act="generate"]').disabled);
   assert.equal(log.consentWrites.length, 1);
-  assert.equal(log.consentWrites[0].body.world_vibe_private, true);
-  assert.equal(log.consentWrites[0].body.user_id, 'u-1');
-  assert.equal(log.consentWrites[0].headers.apikey, KEY);
+  assert.deepEqual(log.consentWrites[0].body, { world_vibe_private: true });
   assert.equal(log.consentWrites[0].headers.authorization, 'Bearer tok-abc');
-  assert.equal(log.consentWrites[0].headers['content-profile'], 'somacheck_engine');
+  assert.equal(log.sb.filter((r) => r.url.includes('/rest/v1/')).length, 0, 'consent never goes through PostgREST');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'consent', 'focus stays on the switch');
   await page.locator('[data-act="generate"]').click();
   await page.waitForSelector('#slot .line:not(.small)');
@@ -381,6 +397,13 @@ await check('sign in: the magic link request carries the publishable key and no 
   await page.close();
 });
 
+await check('the shipped config carries the publishable key: Sign in shows without any override', async () => {
+  const { page } = await open(420, { key: 'default' });
+  assert.equal(await page.evaluate(() => window.SOMACHECK_SUPABASE_PUBLISHABLE_KEY), 'sb_publishable_af-lUNI2FqEcb-oGy-4uxQ_cnm6kY85');
+  assert.equal(await page.locator('#account [data-open="signin"]').count(), 1);
+  await page.close();
+});
+
 await check('the Sign in control is hidden while no publishable key is configured', async () => {
   const { page } = await open(420, { key: '' });
   assert.equal(await page.locator('#account').innerHTML(), '');
@@ -398,6 +421,22 @@ await check('sign out clears the session: no bearer afterwards, token gone from 
   await page.locator('[data-act="skip"]').click();
   await page.waitForFunction(() => document.querySelector('.line').textContent.includes('Monday'));
   assert.deepEqual(log.api.slice(before).filter((r) => r.auth), []);
+  await page.close();
+});
+
+await check('sign out removes the own reading from the page and drops a progress answer that arrives later', async () => {
+  const progress = [progressEnvelope({ slug: 'pick-one', your_checkin_counted: true, revealed_by_you: true, your_reading: 'aligned' })];
+  const { page } = await open(420, { signedIn: true, progress });
+  await page.locator('[data-act="check"]').click();
+  await page.locator('[data-act="send"]').click();
+  await page.waitForFunction(() => document.getElementById('sent').textContent.includes('Sent'));
+  await page.locator('[data-act="checked"]').click();
+  await page.waitForSelector('.own');
+  await page.locator('[data-act="signout"]').click();
+  await page.waitForSelector('#account [data-open="signin"]');
+  assert.equal(await page.locator('.own').count(), 0);
+  assert.doesNotMatch(await page.locator('#slot').textContent(), /Your reading|YOU REVEALED/);
+  assert.equal(await page.locator('#slot [data-act="check"]').count(), 1);
   await page.close();
 });
 
@@ -465,6 +504,73 @@ await check('Explore: the Following sign-in state links to the home sign-in, and
   await out.page.close();
 });
 
+await check('QR landing: the item, its ladder progress, an app link and an install fallback', async () => {
+  const { page, log, errors } = await open(420, { pageUrl: '/world-vibe/share/?item=wv3-r2-public', noWait: true, item: itemRow({ contributor_count: 5, aligned: null, unaligned: null, lean: 'mixed', public_signals: false, unlock_threshold: 3 }) });
+  await page.waitForSelector('[data-state="item"]:not([hidden])');
+  assert.equal(await page.locator('#line').textContent(), itemRow().statement);
+  assert.equal(await page.locator('#headline').textContent(), 'Mixed so far');
+  assert.equal(await page.locator('#detail').textContent(), '5 checked in');
+  assert.equal(await page.locator('#open').getAttribute('href'), 'https://go.somacheck.com/world-vibe/share/?item=wv3-r2-public');
+  assert.match(await page.locator('#install').getAttribute('href'), /^https:\/\/testflight\.apple\.com\//);
+  assert.deepEqual(log.items, [{ path: '/v1/public/world-vibe/items/wv3-r2-public', auth: undefined }]);
+  assert.deepEqual(errors, []);
+  assert.equal(await page.locator('[data-state="missing"]').isHidden(), true);
+  await page.close();
+});
+
+await check('QR landing: unknown slug is "not found", malformed slug makes no request, server failure is "unavailable"', async () => {
+  const gone = await open(420, { pageUrl: '/world-vibe/share/?item=no-such-item', noWait: true, item: 404 });
+  await gone.page.waitForSelector('[data-state="missing"]:not([hidden])');
+  assert.match(await gone.page.locator('[data-state="missing"]').textContent(), /couldn't find that line/);
+  assert.equal(await gone.page.locator('[data-state="item"]').isHidden(), true);
+  await gone.page.close();
+  const bad = await open(420, { pageUrl: '/world-vibe/share/?item=Not%20A%20Slug', noWait: true });
+  await bad.page.waitForSelector('[data-state="missing"]:not([hidden])');
+  assert.equal(bad.log.items.length, 0);
+  await bad.page.close();
+  const none = await open(420, { pageUrl: '/world-vibe/share/', noWait: true });
+  await none.page.waitForSelector('[data-state="missing"]:not([hidden])');
+  await none.page.close();
+  const down = await open(420, { pageUrl: '/world-vibe/share/?item=x-1', noWait: true, item: 500 });
+  await down.page.waitForSelector('[data-state="unavailable"]:not([hidden])');
+  await down.page.close();
+});
+
+await check('the Chrome install page exists and the Bring sheet links to it', async () => {
+  const { page } = await open(420);
+  await page.locator('[data-open="bring"]').click();
+  assert.equal(await page.locator('#sheet .chrome a').getAttribute('href'), '/world-vibe/chrome/');
+  await page.goto(ORIGIN + '/world-vibe/chrome/');
+  assert.match(await page.locator('h1').textContent(), /World Vibe for Chrome/);
+  assert.match(await page.locator('main').textContent(), /Load unpacked/);
+  await page.close();
+});
+
+await check('check sheet shows the universal link next to the QR and it is keyboard reachable', async () => {
+  const { page } = await open(420, { signedIn: true });
+  await page.locator('[data-act="check"]').click();
+  await page.waitForSelector('#sheet [data-act="send"]');
+  const link = page.locator('#sheet a.open-link');
+  assert.equal(await link.getAttribute('href'), 'https://go.somacheck.com/world-vibe/share/?item=pick-one');
+  await link.focus();
+  assert.equal(await page.evaluate(() => document.activeElement.className), 'open-link');
+  await page.close();
+});
+
+await check('Send to my phone is not offered until the phone route says linked, and not at all when it says not linked', async () => {
+  const unlinked = await open(420, { signedIn: true, linked: false });
+  await unlinked.page.locator('[data-act="check"]').click();
+  await unlinked.page.waitForFunction(() => document.getElementById('sent').textContent.includes('connect an agent'));
+  assert.equal(await unlinked.page.locator('#sheet [data-act="send"]').count(), 0);
+  assert.ok(await unlinked.page.locator('#qr canvas, #qr img').count() > 0);
+  assert.equal(unlinked.log.asks.length, 0);
+  await unlinked.page.close();
+  const out = await open(420);
+  await out.page.locator('[data-act="check"]').click();
+  assert.equal(out.log.phone.length, 0, 'signed out never asks the phone route');
+  await out.page.close();
+});
+
 async function axeCheck(name, setup, opts = {}) {
   await check('axe 0 serious/critical: ' + name, async () => {
     const { page } = await open(opts.width || 420, opts.open || {});
@@ -493,6 +599,9 @@ await axeCheck('private line written', async (p) => { await consentOn(p); await 
 await axeCheck('private check sheet', async (p) => { await consentOn(p); await p.locator('[data-act="generate"]').click(); await p.waitForSelector('#slot .line:not(.small)'); await p.locator('[data-act="check"]').click(); }, { open: { signedIn: true, consent: true } });
 await axeCheck('reveal', async (p) => { await p.locator('[data-act="check"]').click(); await p.locator('[data-act="checked"]').click(); await p.waitForSelector('.reveal-head'); }, { open: { progress: [progressEnvelope({ slug: 'pick-one', revealed_by_you: true, your_reading: 'aligned' })], signedIn: true } });
 await axeCheck('empty state', async () => {}, { open: { picks: [{ item: null, reason: null }] , noWait: false } });
+await axeCheck('QR landing item', async (p) => { await p.waitForSelector('[data-state="item"]:not([hidden])'); }, { open: { pageUrl: '/world-vibe/share/?item=wv3-r2-public', noWait: true } });
+await axeCheck('QR landing not found', async (p) => { await p.waitForSelector('[data-state="missing"]:not([hidden])'); }, { open: { pageUrl: '/world-vibe/share/?item=nope', noWait: true, item: 404 } });
+await axeCheck('Chrome install page', async () => {}, { open: { pageUrl: '/world-vibe/chrome/', noWait: true } });
 await axeCheck('how it works sheet', async (p) => { await p.locator('[data-open="how"]').click(); });
 
 await browser.close();
