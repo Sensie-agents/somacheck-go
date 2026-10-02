@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>World Vibe</title>
+  <link rel="stylesheet" href="/world-vibe/share/topic.css">
+  <link rel="stylesheet" href="/world-vibe/share/item.css">
+</head>
+<body>
+  <main class="card">
+    <div class="brand">SomaCheck</div>
+    <h1>World Vibe</h1>
+    <div data-state="loading" aria-live="polite"><p class="status">Loading this line...</p></div>
+    <div data-state="item" hidden>
+      <blockquote id="line"></blockquote>
+      <p class="tag" id="public" hidden></p>
+      <div class="progress" aria-live="polite"><strong id="headline"></strong><span id="detail"></span></div>
+      <div class="actions">
+        <a class="button button-primary" id="open" href="https://go.somacheck.com/world-vibe/share/">Open in SomaCheck</a>
+        <a class="button button-secondary" id="install" href="https://testflight.apple.com/join/C4mAH3zz">Get SomaCheck</a>
+      </div>
+      <p class="privacy">Check in with a 3-second gesture on your phone. Your identity is not shown. Results appear only in aggregate.</p>
+    </div>
+    <div data-state="missing" hidden role="status">
+      <p class="status">We couldn't find that line. It may have been removed, or the link is incomplete.</p>
+      <p class="footer"><a href="/world-vibe/">See a line picked for you</a></p>
+    </div>
+    <div data-state="unavailable" hidden role="status">
+      <p class="status error">Couldn't load this line right now. Try again in a moment.</p>
+      <p class="footer"><a href="/world-vibe/share/" onclick="location.reload();return false">Try again</a></p>
+    </div>
+    <p class="footer"><a href="/world-vibe/">Explore World Vibe</a> · <a href="/privacy">Privacy</a></p>
+  </main>
+  <script src="/world-vibe/config.js"></script>
+  <script type="module" src="/world-vibe/share/item.js"></script>
+</body>
+</html>

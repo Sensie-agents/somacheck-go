@@ -1,12 +1,12 @@
-// Home data layer against stand-ins for the statement-api routes. Item bodies
+// Home data layer against recorded responses for the statement-api routes. Item bodies
 // are built around the captured rows (tests/helpers/captured.mjs); the envelope
 // shapes follow the route handlers. Contract captures for pick, progress, ask,
 // drafts and consent are not in the integration fixtures yet (see receipt), so
 // these are behaviour tests, not contract replays.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extendExcludes, loadPick, loadProgress, sendToPhone, generateDrafts, askPrivate, getConsent, setConsent, shareUrlFor, MAX_EXCLUDES } from '../world-vibe/home/home-data.js';
-import { pickEnvelope, progressEnvelope, feedRow } from './helpers/captured.mjs';
+import { extendExcludes, loadPick, loadProgress, sendToPhone, generateDrafts, askPrivate, getConsent, setConsent, loadPhoneLinked, loadItem, itemSlugFromSearch, shareUrlFor, MAX_EXCLUDES } from '../world-vibe/home/home-data.js';
+import { pickEnvelope, progressEnvelope, feedRow, consentBody, phoneBody, itemRow } from './helpers/captured.mjs';
 
 const API = 'https://api.test';
 const res = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
@@ -168,60 +168,91 @@ test('private ask: POSTs the draft id with the bearer; nothing is sent signed ou
   assert.deepEqual(await askPrivate(recorder(() => res(409, { error: 'ask_unavailable' })), API, UUID, 't'), { status: 'error' });
 });
 
-// A stateful stand-in for the owner-RLS user_context_consent table behind PostgREST.
-function consentTable(userId) {
-  let row = null;
-  const f = recorder(async (u, init) => {
-    assert.equal(u.pathname, '/rest/v1/user_context_consent');
-    if (init.method === 'POST') {
-      const b = JSON.parse(init.body);
-      if (b.user_id !== userId) return res(403, {});
-      row = { world_vibe_private: b.world_vibe_private };
-      return res(201, [row]);
-    }
-    return res(200, row ? [row] : []);
+// A stateful stand-in for the consent route: the flag is per bearer and nobody else's is readable.
+function consentRoute() {
+  const flags = new Map();
+  return recorder(async (u, init) => {
+    assert.equal(u.pathname, '/v1/me/world-vibe/consent');
+    const who = (init.headers || {}).Authorization;
+    if (!who) return res(401, { error: 'unauthorized' });
+    if (init.method === 'PUT') { flags.set(who, JSON.parse(init.body).world_vibe_private === true); return res(200, consentBody(flags.get(who))); }
+    return res(200, consentBody(flags.get(who) === true));
   });
-  return f;
 }
-const sess = (token = 'tok') => ({ supabaseUrl: 'https://sb.test', publishableKey: 'sb_publishable_k', getAccessToken: () => token, userId: () => 'u-1' });
 
-test('consent toggle round-trips: off by default, on after set, readable back, off again', async () => {
-  const f = consentTable('u-1');
-  assert.deepEqual(await getConsent(f, sess()), { consent: false, error: null });
-  assert.deepEqual(await setConsent(f, sess(), true), { consent: true, error: null });
-  assert.deepEqual(await getConsent(f, sess()), { consent: true, error: null });
-  assert.deepEqual(await setConsent(f, sess(), false), { consent: false, error: null });
-  assert.deepEqual(await getConsent(f, sess()), { consent: false, error: null });
+test('consent toggle round-trips through the API: off by default, on after PUT, readable back, off again', async () => {
+  const f = consentRoute();
+  assert.deepEqual(await getConsent(f, API, 'tok'), { consent: false, error: null });
+  assert.deepEqual(await setConsent(f, API, 'tok', true), { consent: true, error: null });
+  assert.deepEqual(await getConsent(f, API, 'tok'), { consent: true, error: null });
+  assert.deepEqual(await setConsent(f, API, 'tok', false), { consent: false, error: null });
+  assert.deepEqual(await getConsent(f, API, 'tok'), { consent: false, error: null });
+  assert.deepEqual(await getConsent(f, API, 'someone-else'), { consent: false, error: null });
 });
 
-test('consent requests carry the publishable key, the bearer and the somacheck_engine profile; the row is upserted by user_id', async () => {
-  const f = consentTable('u-1');
-  await setConsent(f, sess(), true);
-  await getConsent(f, sess());
+test('consent requests: GET and PUT on the consent route with the bearer, a boolean-only body, and no database access', async () => {
+  const f = consentRoute();
+  await setConsent(f, API, 'tok', true);
+  await getConsent(f, API, 'tok');
   const [w, r] = f.calls;
-  assert.equal(w.init.headers.apikey, 'sb_publishable_k');
-  assert.equal(w.init.headers.Authorization, 'Bearer tok');
-  assert.equal(w.init.headers['Content-Profile'], 'somacheck_engine');
-  assert.match(w.init.headers.Prefer, /resolution=merge-duplicates/);
-  assert.equal(new URL(w.url).searchParams.get('on_conflict'), 'user_id');
-  assert.deepEqual(Object.keys(JSON.parse(w.init.body)).sort(), ['updated_at', 'user_id', 'world_vibe_private']);
-  assert.equal(r.init.headers['Accept-Profile'], 'somacheck_engine');
-  assert.equal(new URL(r.url).searchParams.get('select'), 'world_vibe_private');
+  assert.equal(w.init.method, 'PUT');
+  assert.equal(w.url, API + '/v1/me/world-vibe/consent');
+  assert.equal(auth(w), 'Bearer tok');
+  assert.deepEqual(JSON.parse(w.init.body), { world_vibe_private: true });
+  assert.equal(r.url, API + '/v1/me/world-vibe/consent');
+  assert.equal(auth(r), 'Bearer tok');
+  for (const c of f.calls) {
+    assert.doesNotMatch(c.url, /\/rest\/v1|somacheck_engine/);
+    assert.equal((c.init.headers || {}).apikey, undefined);
+    assert.equal((c.init.headers || {})['Accept-Profile'], undefined);
+  }
 });
 
-test('consent: signed out makes no request; 401 and failures are reported', async () => {
-  const f = consentTable('u-1');
-  assert.deepEqual(await getConsent(f, sess(null)), { consent: null, error: 'signin' });
-  assert.deepEqual(await setConsent(f, sess(null), true), { consent: null, error: 'signin' });
+test('consent: signed out makes no request; 401 and failures are reported; a body without the boolean is not a yes', async () => {
+  const f = consentRoute();
+  assert.deepEqual(await getConsent(f, API, null), { consent: null, error: 'signin' });
+  assert.deepEqual(await setConsent(f, API, null, true), { consent: null, error: 'signin' });
   assert.equal(f.calls.length, 0);
-  assert.equal((await getConsent(recorder(() => res(401, {})), sess())).error, 'signin');
-  assert.equal((await setConsent(recorder(() => res(500, {})), sess(), true)).error, 'unavailable');
-  assert.equal((await getConsent(async () => { throw new TypeError('offline'); }, sess())).error, 'unavailable');
+  assert.equal((await getConsent(recorder(() => res(401, {})), API, 'tok')).error, 'signin');
+  assert.equal((await setConsent(recorder(() => res(401, {})), API, 'tok', true)).error, 'signin');
+  assert.equal((await setConsent(recorder(() => res(500, {})), API, 'tok', true)).error, 'unavailable');
+  assert.equal((await getConsent(async () => { throw new TypeError('offline'); }, API, 'tok')).error, 'unavailable');
+  assert.deepEqual(await getConsent(recorder(() => res(200, {})), API, 'tok'), { consent: null, error: 'unavailable' });
+  assert.deepEqual(await setConsent(recorder(() => res(200, { world_vibe_private: 'yes' })), API, 'tok', true), { consent: null, error: 'unavailable' });
 });
 
-test('consent: a write the table refuses never reads back as on', async () => {
-  const f = consentTable('someone-else');
-  const r = await setConsent(f, sess(), true);
-  assert.equal(r.consent, null);
-  assert.equal(r.error, 'unavailable');
+test('phone link: linked only when the route says linked === true; every other answer is not linked; signed out sends nothing', async () => {
+  const f = recorder(() => res(200, phoneBody(true)));
+  assert.equal(await loadPhoneLinked(f, API, 'tok'), true);
+  assert.equal(f.calls[0].url, API + '/v1/me/world-vibe/phone');
+  assert.equal(auth(f.calls[0]), 'Bearer tok');
+  assert.equal(await loadPhoneLinked(recorder(() => res(200, phoneBody(false))), API, 'tok'), false);
+  assert.equal(await loadPhoneLinked(recorder(() => res(200, { linked: 'true' })), API, 'tok'), false);
+  assert.equal(await loadPhoneLinked(recorder(() => res(401, {})), API, 'tok'), false);
+  assert.equal(await loadPhoneLinked(recorder(() => res(500, {})), API, 'tok'), false);
+  assert.equal(await loadPhoneLinked(async () => { throw new TypeError('offline'); }, API, 'tok'), false);
+  const g = recorder(() => res(200, phoneBody(true)));
+  assert.equal(await loadPhoneLinked(g, API, null), false);
+  assert.equal(g.calls.length, 0);
+});
+
+test('item route: loads the captured item by slug; unknown, malformed or mismatched slugs are an honest not found or unavailable', async () => {
+  const body = itemRow();
+  const f = recorder(() => res(200, body));
+  assert.deepEqual(await loadItem(f, API, body.slug), { item: body, error: null });
+  assert.equal(f.calls[0].url, API + '/v1/public/world-vibe/items/' + body.slug);
+  assert.equal((f.calls[0].init.headers || {}).Authorization, undefined);
+  assert.deepEqual(await loadItem(recorder(() => res(404, { error: 'not_found' })), API, 'gone-item'), { item: null, error: 'not_found' });
+  assert.deepEqual(await loadItem(recorder(() => res(500, {})), API, 'x-1'), { item: null, error: 'unavailable' });
+  assert.deepEqual(await loadItem(recorder(() => res(200, body)), API, 'other-slug'), { item: null, error: 'unavailable' });
+  for (const bad of [null, '', 'Not A Slug', '../x', 'x'.repeat(101)]) {
+    const g = recorder(() => res(200, body));
+    assert.deepEqual(await loadItem(g, API, bad), { item: null, error: 'not_found' }, JSON.stringify(bad));
+    assert.equal(g.calls.length, 0);
+  }
+});
+
+test('the QR landing reads exactly one valid item slug from the query', () => {
+  assert.equal(itemSlugFromSearch('?item=wv3-r2-named'), 'wv3-r2-named');
+  for (const bad of ['', '?item=', '?item=A', '?item=a&item=b', '?x=1', '?item=../x', '?item=' + 'a'.repeat(101)]) assert.equal(itemSlugFromSearch(bad), null, bad);
 });

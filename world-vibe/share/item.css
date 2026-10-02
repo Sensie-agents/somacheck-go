@@ -1,0 +1,3 @@
+/* Extras for the item landing and the Chrome install page; topic.css is shared and untouched. */
+.steps { margin: 18px 0; padding-left: 22px; text-align: left; color: var(--muted); line-height: 1.6; }
+.steps a { color: var(--emerald-text); }

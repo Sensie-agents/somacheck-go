@@ -181,7 +181,7 @@ test('check sheet signed out: QR with the share URL, no Send to my phone, sign-i
 });
 
 test('check sheet signed in with a link: Send to my phone plus the QR', () => {
-  const html = renderCheckSheet({ ...shared, signedIn: true });
+  const html = renderCheckSheet({ ...shared, signedIn: true, phoneLinked: true });
   assert.match(html, /data-act="send"/);
   assert.ok(html.includes('data-qr="' + SHARE + '"'));
   assert.doesNotMatch(html, /data-open="signin"/);
@@ -201,7 +201,7 @@ test('check sheet after a send says Sent and drops the button', () => {
 });
 
 test('check sheet for a private line has no QR, no URL, no progress button', () => {
-  const html = renderCheckSheet({ statement: 'I am carrying Friday into this week.', slug: null, shareUrl: null, signedIn: true, linkRequired: false, sent: false, error: null });
+  const html = renderCheckSheet({ statement: 'I am carrying Friday into this week.', slug: null, shareUrl: null, signedIn: true, phoneLinked: true, linkRequired: false, sent: false, error: null });
   assert.doesNotMatch(html, /data-qr|go\.somacheck\.com|data-act="checked"|id="qr"/);
   assert.match(html, /data-act="send"/);
 });
@@ -256,7 +256,7 @@ test('no "Prototype only" text under world-vibe/home', () => {
 });
 
 test('no em dashes in any WP12 surface', () => {
-  const files = [...walk(homeDir), ...walk(path.join(root, 'world-vibe', 'explore')), path.join(root, 'world-vibe', 'index.html'), path.join(root, 'world-vibe', 'session.js'), path.join(root, 'world-vibe', 'config.js'), path.join(root, 'auth', 'callback', 'index.html')];
+  const files = [...walk(homeDir), ...walk(path.join(root, 'world-vibe', 'explore')), ...walk(path.join(root, 'world-vibe', 'chrome')), path.join(root, 'world-vibe', 'share', 'index.html'), path.join(root, 'world-vibe', 'share', 'item.js'), path.join(root, 'world-vibe', 'share', 'item-logic.js'), path.join(root, 'world-vibe', 'index.html'), path.join(root, 'world-vibe', 'session.js'), path.join(root, 'world-vibe', 'config.js'), path.join(root, 'auth', 'callback', 'index.html')];
   for (const f of files) assert.ok(!readFileSync(f, 'utf8').includes('—'), f);
 });
 
@@ -271,4 +271,38 @@ test('home.js reads no fixture and no local JSON: every card comes from a live r
 
 test('every captured fixture statement starts with "I " or "My "', () => {
   for (const r of [feedRow, publicSignalRow]) assert.match(r.statement, /^(I|My)\b/);
+});
+
+test('Send to my phone is never shown speculatively: only when the phone route said linked', () => {
+  for (const phoneLinked of [undefined, null, false]) {
+    const html = renderCheckSheet({ ...shared, signedIn: true, phoneLinked });
+    assert.doesNotMatch(html, /data-act="send"/, String(phoneLinked));
+    assert.ok(html.includes('data-qr="' + SHARE + '"'), 'QR stays: ' + phoneLinked);
+  }
+  assert.match(renderCheckSheet({ ...shared, signedIn: true, phoneLinked: true }), /data-act="send"/);
+  assert.doesNotMatch(renderCheckSheet({ ...shared, signedIn: false, phoneLinked: true }), /data-act="send"/);
+  assert.match(text(renderCheckSheet({ ...shared, signedIn: true, phoneLinked: false })), /connect an agent in SomaCheck/);
+  assert.equal(text(renderCheckSheet({ ...shared, signedIn: true, phoneLinked: null })).includes('connect an agent'), false);
+});
+
+test('the check sheet always carries a keyboard reachable universal link next to the QR', () => {
+  for (const over of [{}, { signedIn: true, phoneLinked: true }, { signedIn: true, phoneLinked: false }, { signedIn: true, linkRequired: true }, { signedIn: true, sent: true }]) {
+    const html = renderCheckSheet({ ...shared, ...over });
+    assert.ok(html.includes('<a class="open-link" href="' + SHARE + '">'), JSON.stringify(over));
+    assert.ok(html.indexOf('id="qr"') < html.indexOf('class="open-link"'));
+  }
+  assert.doesNotMatch(renderCheckSheet({ statement: 'I am carrying Friday.', slug: null, shareUrl: null, signedIn: true, phoneLinked: true }), /open-link/);
+});
+
+test('Add to Chrome points at the install page, never "#"', () => {
+  const html = renderBringSheet();
+  assert.match(html, /<a href="\/world-vibe\/chrome\/">Add to Chrome<\/a>/);
+  assert.doesNotMatch(html, /href="#"/);
+});
+
+test('consent gates only the agent source: words writes with consent off or unknown', () => {
+  for (const consent of [false, null]) {
+    assert.match(renderPrivateCard({ phase: 'compose', ctx: 'words', signedIn: true, consent }), /<button class="btn-main" type="button" data-act="generate">/);
+    assert.match(renderPrivateCard({ phase: 'compose', ctx: 'agent', signedIn: true, consent }), /data-act="generate" disabled>/);
+  }
 });

@@ -1,7 +1,7 @@
 import { selectItems, renderFeed, renderFilterText, renderCuratorList, renderStrip, renderSteps, renderHero, renderEnd, nextTab, focusSelector } from './explore-render.js';
 import { getAccessToken, session } from '../session.js';
 import { renderCheckSheet } from '../home/home-render.js';
-import { sendToPhone, shareUrlFor } from '../home/home-data.js';
+import { sendToPhone, shareUrlFor, loadPhoneLinked } from '../home/home-data.js';
 import { drawQr } from '../home/qr.js';
 import { DEFAULT_API, loadFeedInto, retryCursor, loadCurators, loadFeatured, loadFollowing } from './explore-data.js';
 
@@ -50,25 +50,33 @@ function selectTab(name) {
 
 const loadFeedPages = (cursor) => loadFeedInto(data, call, API, cursor);
 
-const sheetState = { line: '', slug: '', linkRequired: false, sent: false, error: null };
+const sheetState = { line: '', slug: '', phoneLinked: null, linkRequired: false, sent: false, error: null };
 
 // The sheet is the same body as the home's: send to my phone only for a signed-in
 // account, the QR otherwise or when the account has no agent link.
 function drawSheet() {
   $('sheet-body').innerHTML = renderCheckSheet({
     statement: sheetState.line, slug: sheetState.slug, shareUrl: shareUrlFor(sheetState.slug), signedIn: Boolean(getAccessToken()),
-    linkRequired: sheetState.linkRequired, sent: sheetState.sent, error: sheetState.error, omitStatement: true, noProgress: true
+    phoneLinked: sheetState.phoneLinked, linkRequired: sheetState.linkRequired, sent: sheetState.sent, error: sheetState.error, omitStatement: true, noProgress: true
   });
   drawQr();
 }
 function openSheet(line, slug) {
   lastFocus = document.activeElement;
-  Object.assign(sheetState, { line, slug, linkRequired: false, sent: false, error: null });
+  Object.assign(sheetState, { line, slug, phoneLinked: null, linkRequired: false, sent: false, error: null });
   $('sheet-line').textContent = line;
   drawSheet();
   $('scrim').hidden = false;
   const f = $('sheet-body').querySelector('.btn-main') || $('close');
   f.focus();
+  // Send to my phone appears only once the account is confirmed linked.
+  if (getAccessToken()) {
+    loadPhoneLinked(call, API, getAccessToken()).then((linked) => {
+      if (sheetState.slug !== slug || $('scrim').hidden) return;
+      sheetState.phoneLinked = linked;
+      drawSheet();
+    });
+  }
 }
 function closeSheet() {
   $('scrim').hidden = true;
@@ -79,7 +87,7 @@ async function sendFromSheet() {
   const r = await sendToPhone(call, API, sheetState.slug, getAccessToken());
   sheetState.error = null;
   if (r.status === 'sent') sheetState.sent = true;
-  else if (r.status === 'link_required') sheetState.linkRequired = true;
+  else if (r.status === 'link_required') { sheetState.linkRequired = true; sheetState.phoneLinked = false; }
   else sheetState.error = r.status;
   drawSheet();
   const f = $('sheet-body').querySelector('.btn-main') || $('sent');

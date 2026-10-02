@@ -168,7 +168,7 @@ const PRIVATE_ERRORS = {
 
 function consentSwitch(state) {
   return '<div class="consent"><label class="switch" for="consent"><input type="checkbox" role="switch" id="consent" data-consent' + (state.consent === true ? ' checked' : '') + '>' +
-    '<span>Let SomaCheck use what I share with my agent, or the words I type here, to write private lines for me.</span></label>' +
+    '<span>Let SomaCheck use what I share with my agent to write private lines for me.</span></label>' +
     '<p class="fine left">Only I see these lines and my readings. I can turn this off any time.</p></div>';
 }
 
@@ -202,7 +202,8 @@ export function renderPrivateCard(state) {
       '<button class="btn-main" type="button" data-open="signin">Sign in to start</button>' +
       '<p class="fine">Sign in with your email. No password.</p></article>';
   }
-  const allowed = state.consent === true;
+  // Only the agent source reads stored context, so only it needs the consent flag.
+  const allowed = ctx === 'words' || state.consent === true;
   return '<article class="card private enter" aria-label="Just for me">' +
     '<span class="why"><i></i>Just for you · private</span>' +
     '<p class="line small">Get a personalized vibecheck to help get aligned today.</p>' +
@@ -246,13 +247,16 @@ export function renderSignInSheet(status) {
 // The statement is only ever shared by its slug: a private draft has none, so a
 // private sheet has no QR, and never leaves the account.
 // ctx: { statement, slug (null for private), shareUrl, signedIn, linkRequired, sent, error,
-//        omitStatement, noProgress } (the last two are for Explore's own sheet)
+//        linked (GET /v1/me/world-vibe/phone said true), omitStatement, noProgress } (the last two
+//        are for Explore's own sheet). Send to my phone for a shared line needs linked === true.
 export function renderCheckSheet(ctx) {
   const priv = !ctx.slug;
-  const showSend = ctx.signedIn && !ctx.linkRequired && !ctx.sent;
+  // Send is offered only once the phone route confirmed an active agent link.
+  const noLink = ctx.linkRequired || ctx.phoneLinked === false;
+  const showSend = ctx.signedIn && ctx.phoneLinked === true && !noLink && !ctx.sent;
   let notice = '';
   if (ctx.sent) notice = 'Sent. Open SomaCheck on your phone.';
-  else if (ctx.linkRequired) notice = 'To send lines straight to your phone, connect an agent in SomaCheck. Scan this instead.';
+  else if (ctx.signedIn && noLink) notice = priv ? 'To send private lines to your phone, connect an agent in SomaCheck.' : 'To send lines straight to your phone, connect an agent in SomaCheck. Scan this instead.';
   else if (ctx.error === 'rate_limited') notice = 'Please wait a moment before sending another.';
   else if (ctx.error === 'pending') notice = 'A check-in is already waiting on your phone.';
   else if (ctx.error === 'signin') notice = 'Your sign-in expired. Sign in again.';
@@ -260,7 +264,8 @@ export function renderCheckSheet(ctx) {
   return (ctx.omitStatement ? '' : '<p class="big">' + esc(ctx.statement) + '</p>') +
     (showSend ? '<button class="btn-main" type="button" data-act="send">Send to my phone</button>' : '') +
     '<div class="fine sent" id="sent" role="status" tabindex="-1">' + esc(notice) + '</div>' +
-    (priv ? '' : (ctx.signedIn ? '' : '<button class="linkbtn" type="button" data-open="signin">Sign in to send this straight to your phone</button>') + '<div class="or">' + (showSend ? 'or scan' : 'Scan') + '</div><div class="qr"><div id="qr" data-qr="' + esc(ctx.shareUrl) + '"></div>With your iPhone camera</div>') +
+    (priv ? '' : (ctx.signedIn ? '' : '<button class="linkbtn" type="button" data-open="signin">Sign in to send this straight to your phone</button>') + '<div class="or">' + (showSend ? 'or scan' : 'Scan') + '</div><div class="qr"><div id="qr" data-qr="' + esc(ctx.shareUrl) + '"></div>With your iPhone camera</div>' +
+      '<p class="fine"><a class="open-link" href="' + esc(ctx.shareUrl) + '">Open this line on this phone: ' + esc(ctx.shareUrl.replace(/^https:\/\//, '')) + '</a></p>') +
     (priv || ctx.noProgress ? '' : '<button class="btn-sec" type="button" data-act="checked">I\'ve checked in</button>') +
     '<p class="fine">Three seconds. Your body answers, not your thumbs.</p>';
 }
@@ -268,6 +273,6 @@ export function renderCheckSheet(ctx) {
 // "Bring your own line" on the web is the Chrome callout only (the paste path
 // waits for the app-side continuity work).
 export function renderBringSheet() {
-  return '<div class="chrome"><small>ON A COMPUTER</small><b>Highlight any line on the web and bring it here with one click.</b><a href="#">Add to Chrome</a></div>' +
+  return '<div class="chrome"><small>ON A COMPUTER</small><b>Highlight any line on the web and bring it here with one click.</b><a href="/world-vibe/chrome/">Add to Chrome</a></div>' +
     '<p class="fine">Your check-in counts first. A shared line appears on World Vibe after your gesture.</p>';
 }

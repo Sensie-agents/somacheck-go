@@ -7,6 +7,7 @@ import { DEFAULT_API } from '../explore/explore-data.js';
 
 export { DEFAULT_API };
 const PUBLIC = '/v1/public/world-vibe';
+const CONSENT = '/v1/me/world-vibe/consent';
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const MAX_EXCLUDES = 100;
 // Opens the app directly through the universal link; no agent link needed.
@@ -85,36 +86,56 @@ export async function askPrivate(fetchFn, base, draftId, token) {
   } catch { return { status: 'error' }; }
 }
 
-// "Just for me" consent: user_context_consent.world_vibe_private. The table is
-// owner-RLS (authenticated may select and upsert only their own row), so the
-// publishable key plus the person's bearer is all the request carries.
-const consentHeaders = (session, token, extra) => ({ apikey: session.publishableKey, Authorization: 'Bearer ' + token, 'Accept-Profile': 'somacheck_engine', ...extra });
-
-export async function getConsent(fetchFn, session) {
-  const token = session.getAccessToken();
+// "Just for me" consent flag: GET/PUT /v1/me/world-vibe/consent
+// { world_vibe_private: boolean, updated_at }. The bearer resolves the person;
+// the browser never touches the database directly.
+export async function getConsent(fetchFn, base, token) {
   if (!token) return { consent: null, error: 'signin' };
   try {
-    const r = await fetchFn(session.supabaseUrl + '/rest/v1/user_context_consent?select=world_vibe_private', { headers: consentHeaders(session, token) });
+    const r = await fetchFn(base + CONSENT, { headers: { Authorization: 'Bearer ' + token } });
     if (r.status === 401) return { consent: null, error: 'signin' };
     if (!r.ok) return { consent: null, error: 'unavailable' };
-    const rows = await r.json();
-    return { consent: Array.isArray(rows) && rows[0] ? rows[0].world_vibe_private === true : false, error: null };
+    const b = await r.json();
+    return typeof b.world_vibe_private === 'boolean' ? { consent: b.world_vibe_private, error: null } : { consent: null, error: 'unavailable' };
   } catch { return { consent: null, error: 'unavailable' }; }
 }
 
-export async function setConsent(fetchFn, session, value) {
-  const token = session.getAccessToken();
-  const userId = session.userId();
-  if (!token || !userId) return { consent: null, error: 'signin' };
+export async function setConsent(fetchFn, base, token, value) {
+  if (!token) return { consent: null, error: 'signin' };
   try {
-    const r = await fetchFn(session.supabaseUrl + '/rest/v1/user_context_consent?on_conflict=user_id', {
-      method: 'POST',
-      headers: consentHeaders(session, token, { 'Content-Type': 'application/json', 'Content-Profile': 'somacheck_engine', Prefer: 'resolution=merge-duplicates,return=representation' }),
-      body: JSON.stringify({ user_id: userId, world_vibe_private: value === true, updated_at: new Date().toISOString() })
-    });
+    const r = await fetchFn(base + CONSENT, { ...asJson(token, { world_vibe_private: value === true }), method: 'PUT' });
     if (r.status === 401) return { consent: null, error: 'signin' };
     if (!r.ok) return { consent: null, error: 'unavailable' };
-    const rows = await r.json();
-    return { consent: Array.isArray(rows) && rows[0] ? rows[0].world_vibe_private === true : null, error: null };
+    const b = await r.json();
+    return typeof b.world_vibe_private === 'boolean' ? { consent: b.world_vibe_private, error: null } : { consent: null, error: 'unavailable' };
   } catch { return { consent: null, error: 'unavailable' }; }
+}
+
+// GET /v1/me/world-vibe/phone -> { linked: boolean }. "Send to my phone" is only
+// offered when this says true; any other answer keeps the QR as the one path.
+export async function loadPhoneLinked(fetchFn, base, token) {
+  if (!token) return false;
+  try {
+    const r = await fetchFn(base + '/v1/me/world-vibe/phone', { headers: { Authorization: 'Bearer ' + token } });
+    if (!r.ok) return false;
+    return (await r.json()).linked === true;
+  } catch { return false; }
+}
+
+// The slug a QR landing was opened with: exactly one valid `item` value.
+export function itemSlugFromSearch(search) {
+  const all = new URLSearchParams(search).getAll('item');
+  return all.length === 1 && all[0].length <= 100 && SLUG.test(all[0]) ? all[0] : null;
+}
+
+// GET /items/{slug} (the v3 item route, same row shape as the feed).
+export async function loadItem(fetchFn, base, slug) {
+  if (!slug || slug.length > 100 || !SLUG.test(slug)) return { item: null, error: 'not_found' };
+  try {
+    const r = await fetchFn(base + PUBLIC + '/items/' + encodeURIComponent(slug));
+    if (r.status === 404) return { item: null, error: 'not_found' };
+    if (!r.ok) return { item: null, error: 'unavailable' };
+    const item = await r.json();
+    return item && item.slug === slug ? { item, error: null } : { item: null, error: 'unavailable' };
+  } catch { return { item: null, error: 'unavailable' }; }
 }

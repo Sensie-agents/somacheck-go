@@ -2,7 +2,7 @@
   "name": "somacheck-go",
   "private": true,
   "scripts": {
-    "test": "node --test tests/wv3-home-render.test.mjs tests/wv3-explore-render.test.mjs tests/wv3-session.test.mjs tests/wv3-home-data.test.mjs tests/wv3-fixtures-identity.test.mjs",
+    "test": "node --test tests/wv3-home-render.test.mjs tests/wv3-explore-render.test.mjs tests/wv3-session.test.mjs tests/wv3-home-data.test.mjs tests/wv3-home-flow.test.mjs tests/wv3-share-item.test.mjs tests/wv3-fixtures-identity.test.mjs",
     "test:browser": "node tests/wv3-explore-browser.test.mjs && node tests/wv3-home-browser.test.mjs"
   }
 }

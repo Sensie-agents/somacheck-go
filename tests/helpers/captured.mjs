@@ -20,3 +20,15 @@ export const pickOf = (reason, over = {}) => ({ ...feedRow, reason, ...over });
 // The route envelopes, built around captured rows.
 export const pickEnvelope = (reason, over = {}) => { const { reason: _r, ...item } = pickOf(reason, over); return { item, reason }; };
 export const progressEnvelope = (over = {}) => ({ ...feedRow, your_checkin_counted: true, revealed_by_you: false, your_reading: null, ...over });
+
+// Consent and phone-link responses. The backend lane captures these as
+// fixtures/wv3_consent.json and fixtures/wv3_phone.json; until they are dropped
+// into world-vibe/explore/fixtures the recorded shape from the route contract is
+// used, and the same tests then run against the capture unchanged.
+const capture = (name, fallback) => { try { return load(name); } catch { return fallback; } };
+export const consentCapture = capture('wv3_consent.json', { world_vibe_private: false, updated_at: '2026-10-02T00:00:00+00:00' });
+export const phoneCapture = capture('wv3_phone.json', { linked: true });
+export const consentBody = (value) => ({ ...consentCapture, world_vibe_private: value });
+export const phoneBody = (linked) => ({ ...phoneCapture, linked });
+// The item route returns the same row shape as the feed; the captured item row is the reference.
+export const itemRow = (over = {}) => ({ ...publicSignalRow, ...over });
