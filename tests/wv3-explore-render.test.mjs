@@ -38,7 +38,7 @@ const FIXTURE_SHA = {
   'wv3_explore_my_follows.json': '1fc99536bc89dc400871364362fabf28a0961a76283869be282accc8842523a1',
   'wv3_explore_v2_golden.json': 'f03776f66c3fce246cc80613176b6255bed145c3b8e03ee1ccf3324d42e83392'
 };
-const SOURCE = '/Volumes/SensieSSD/agent_tmp/worktrees/wv3-explore-sol/supabase/functions/statement-api/fixtures/';
+const SOURCE = '/Volumes/SensieSSD/agent_tmp/worktrees/wv3-integration/supabase/functions/statement-api/fixtures/';
 
 // A fetch double that records urls and answers with the real route envelopes.
 function fakeFetch(routes) {
