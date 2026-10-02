@@ -76,11 +76,31 @@ export function renderFeed(state, data) {
 }
 
 // Under the feed: "Load more" while pages remain, "all caught up" only when the
-// cursor is exhausted. The following list is not paged.
+// cursor is exhausted. A failed continuation keeps its rows and unread cursor
+// and shows the error with Try again instead of either. The following list is
+// not paged.
 export function renderEnd(state, data) {
   if (state.tab === 'following' && !state.curator) return selectItems(state, data).length ? "You're all caught up." : '';
+  if (data.feedError && selectItems(state, data).length) return errorBox("Couldn't load more lines.", 'more');
   if (data.feedCursor && !data.feedError) return '<button class="more" type="button" data-more>Load more</button>';
   return selectItems(state, data).length ? "You're all caught up." : '';
+}
+
+// Selector that finds the focused control again after a re-render. It is built
+// from the stable list container (never the control's parent, which has no id).
+export function focusSelector(el) {
+  if (!el || !el.closest) return null;
+  const w = el.closest('[data-who]');
+  if (w) {
+    const root = w.closest('#strip, #cur-list');
+    return root ? '#' + root.id + ' [data-who="' + w.dataset.who + '"]' : null;
+  }
+  const m = el.closest('[data-more],[data-retry]');
+  if (m) {
+    const root = m.closest('#feed, #end');
+    return root ? '#' + root.id + ' ' + (m.hasAttribute('data-more') ? '[data-more]' : '[data-retry]') : null;
+  }
+  return null;
 }
 
 const TABS = ['all', 'following'];

@@ -4,7 +4,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { selectItems, renderFeed, renderEnd, nextTab, renderPost, renderCuratorList, renderStrip, renderFilterText, renderHero, PUBLIC_SIGNAL_LABEL } from '../world-vibe/explore/explore-render.js';
+import { selectItems, renderFeed, renderEnd, focusSelector, nextTab, renderPost, renderCuratorList, renderStrip, renderFilterText, renderHero, PUBLIC_SIGNAL_LABEL } from '../world-vibe/explore/explore-render.js';
 import { loadFeed, loadCurators, loadFeatured, loadFollowing } from '../world-vibe/explore/explore-data.js';
 import { getAccessToken } from '../world-vibe/explore/session.js';
 
@@ -134,6 +134,51 @@ test('"all caught up" is shown only when no cursor remains; otherwise Load more'
   // A curator filter over a partly loaded feed must not claim completeness either.
   assert.match(renderEnd({ tab: 'all', curator: 'nobody' }, { ...data, feedCursor: 'c3' }), /Load more/);
   assert.equal(renderEnd({ tab: 'following', curator: null }, { ...data, feedCursor: 'c3' }), "You're all caught up.");
+});
+
+test('a failed Load more keeps rows and cursor, shows the error with Try again, never "all caught up"', () => {
+  const st = { tab: 'all', curator: null };
+  const failed = { ...data, feedCursor: 'c3', feedError: true };
+  assert.equal(slugs(renderFeed(st, failed)).length, feedRows.length);
+  const end = renderEnd(st, failed);
+  assert.match(end, /role="alert"/);
+  assert.match(end, /data-retry="more"[^>]*>Try again/);
+  assert.doesNotMatch(end, /caught up|data-more/);
+  // With the cursor already cleared the failure still must not read as complete.
+  assert.doesNotMatch(renderEnd(st, { ...data, feedCursor: null, feedError: true }), /caught up/);
+  // Initial-load failure (no rows) keeps its single error in the feed, not a second one here.
+  assert.equal(renderEnd(st, { feed: [], feedCursor: null, feedError: true, curators: [] }), '');
+});
+
+test('explore.js retries a failed continuation from the unread cursor, not from the first page', () => {
+  assert.match(read('explore.js'), /retry === 'more'\) loadFeedPages\(data\.feedCursor\)/);
+});
+
+// Minimal element double: closest() resolves through the parent chain like the DOM.
+function node(attrs, parent = null) {
+  const n = { id: attrs.id || '', dataset: attrs.dataset || {}, parentElement: parent, hasAttribute: (k) => k === 'data-more' && !!attrs.more,
+    closest(sel) {
+      const want = sel.split(',').map((x) => x.trim());
+      for (let e = n; e; e = e.parentElement) {
+        if (want.some((w) => (w === '[data-who]' && 'who' in e.dataset) || (w === '[data-more]' && e.isMore) || (w === '[data-retry]' && 'retry' in e.dataset) || (w.startsWith('#') && w.slice(1) === e.id && e.id))) return e;
+      }
+      return null;
+    } };
+  n.isMore = !!attrs.more;
+  return n;
+}
+
+test('focus restore keys on the stable list container, never an id-less parent', () => {
+  const feed = node({ id: 'feed' });
+  const wrap = node({}, feed);
+  assert.equal(focusSelector(node({ dataset: { retry: 'feed' } }, wrap)), '#feed [data-retry]');
+  const end = node({ id: 'end' });
+  assert.equal(focusSelector(node({ dataset: { retry: 'more' } }, end)), '#end [data-retry]');
+  assert.equal(focusSelector(node({ more: true }, end)), '#end [data-more]');
+  const strip = node({ id: 'strip' });
+  assert.equal(focusSelector(node({ dataset: { who: 'abc' } }, strip)), '#strip [data-who="abc"]');
+  assert.equal(focusSelector(node({}, end)), null);
+  assert.equal(focusSelector(null), null);
 });
 
 test('featured null is a normal state', async () => {

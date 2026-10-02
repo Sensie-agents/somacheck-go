@@ -1,4 +1,4 @@
-import { selectItems, renderFeed, renderFilterText, renderCuratorList, renderStrip, renderSteps, renderHero, renderEnd, nextTab } from './explore-render.js';
+import { selectItems, renderFeed, renderFilterText, renderCuratorList, renderStrip, renderSteps, renderHero, renderEnd, nextTab, focusSelector } from './explore-render.js';
 import { getAccessToken } from './session.js';
 import { DEFAULT_API, loadFeed, loadCurators, loadFeatured, loadFollowing } from './explore-data.js';
 
@@ -14,18 +14,8 @@ let lastFocus = null;
 
 // Re-rendering replaces the lists through innerHTML, which would drop focus
 // from the control the user just activated. Remember it and put it back.
-function focusKey() {
-  const el = document.activeElement;
-  if (!el || !el.closest) return null;
-  const w = el.closest('[data-who]');
-  if (w) return { sel: '#' + w.parentElement.id + ' [data-who="' + w.dataset.who + '"]' };
-  const m = el.closest('[data-more],[data-retry]');
-  if (m) return { sel: '#' + m.parentElement.id + ' ' + (m.hasAttribute('data-more') ? '[data-more]' : '[data-retry]') };
-  return null;
-}
-
 function render() {
-  const keep = focusKey();
+  const keep = focusSelector(document.activeElement);
   document.querySelectorAll('.tab').forEach((t) => {
     const on = t.dataset.tab === st.tab;
     t.setAttribute('aria-selected', String(on));
@@ -41,7 +31,7 @@ function render() {
   $('hero').hidden = !$('hero').innerHTML;
   $('end').innerHTML = renderEnd(st, data);
   $('end').hidden = !$('end').innerHTML;
-  if (keep) { const again = document.querySelector(keep.sel); if (again) again.focus(); }
+  if (keep) { const again = document.querySelector(keep); if (again) again.focus(); }
 }
 
 function loadFollowingTab() {
@@ -85,6 +75,7 @@ document.addEventListener('click', (e) => {
   const rt = e.target.closest('[data-retry]');
   if (rt) {
     if (rt.dataset.retry === 'following') loadFollowingTab();
+    else if (rt.dataset.retry === 'more') loadFeedPages(data.feedCursor).then(render);
     else loadFeedPages(null).then(render);
     return;
   }
