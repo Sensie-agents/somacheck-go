@@ -1,6 +1,6 @@
 import { selectItems, renderFeed, renderFilterText, renderCuratorList, renderStrip, renderSteps, renderHero, renderEnd, nextTab, focusSelector } from './explore-render.js';
 import { getAccessToken } from './session.js';
-import { DEFAULT_API, loadFeed, loadCurators, loadFeatured, loadFollowing } from './explore-data.js';
+import { DEFAULT_API, loadFeedInto, retryCursor, loadCurators, loadFeatured, loadFollowing } from './explore-data.js';
 
 const API = window.SOMACHECK_API_BASE || DEFAULT_API;
 const call = (url, init) => fetch(url, init);
@@ -45,12 +45,7 @@ function selectTab(name) {
   if (name === 'following' && (data.followingError || !data.following.length)) loadFollowingTab();
 }
 
-function loadFeedPages(cursor) {
-  return loadFeed(call, API, { cursor }).then(
-    (r) => { data.feed = cursor ? data.feed.concat(r.items) : r.items; data.feedCursor = r.cursor; data.feedError = false; },
-    () => { data.feedError = true; }
-  );
-}
+const loadFeedPages = (cursor) => loadFeedInto(data, call, API, cursor);
 
 function openSheet(line) {
   lastFocus = document.activeElement;
@@ -75,8 +70,7 @@ document.addEventListener('click', (e) => {
   const rt = e.target.closest('[data-retry]');
   if (rt) {
     if (rt.dataset.retry === 'following') loadFollowingTab();
-    else if (rt.dataset.retry === 'more') loadFeedPages(data.feedCursor).then(render);
-    else loadFeedPages(null).then(render);
+    else loadFeedPages(retryCursor(data)).then(render);
     return;
   }
   if (e.target === $('scrim')) closeSheet();

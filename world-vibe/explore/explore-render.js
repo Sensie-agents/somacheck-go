@@ -63,7 +63,7 @@ export function renderFeed(state, data) {
   if (items.length) return items.map(renderPost).join('');
   // A failed load is never reported as an empty state, before or after filtering.
   if (state.curator || state.tab !== 'following') {
-    if (data.feedError) return errorBox("Couldn't load lines right now.", 'feed');
+    if (data.feedError) return errorBox("Couldn't load lines right now.", data.feedCursor ? 'more' : 'feed');
     if (state.curator) return '<p class="end">No lines from this curator right now.</p>';
     return '<p class="end">No lines here yet this week.</p>';
   }
@@ -98,7 +98,8 @@ export function focusSelector(el) {
   const m = el.closest('[data-more],[data-retry]');
   if (m) {
     const root = m.closest('#feed, #end');
-    return root ? '#' + root.id + ' ' + (m.hasAttribute('data-more') ? '[data-more]' : '[data-retry]') : null;
+    // Load more turns into Try again (and back) in place, so match either.
+    return root ? '#' + root.id + ' [data-more], #' + root.id + ' [data-retry]' : null;
   }
   return null;
 }

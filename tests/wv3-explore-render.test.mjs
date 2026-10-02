@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { selectItems, renderFeed, renderEnd, focusSelector, nextTab, renderPost, renderCuratorList, renderStrip, renderFilterText, renderHero, PUBLIC_SIGNAL_LABEL } from '../world-vibe/explore/explore-render.js';
-import { loadFeed, loadCurators, loadFeatured, loadFollowing } from '../world-vibe/explore/explore-data.js';
+import { loadFeed, loadFeedInto, retryCursor, loadCurators, loadFeatured, loadFollowing } from '../world-vibe/explore/explore-data.js';
 import { getAccessToken } from '../world-vibe/explore/session.js';
 
 const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'world-vibe', 'explore');
@@ -30,11 +30,12 @@ const feedRows = [
 const data = { feed: feedRows, following: [REAL.following], curators: REAL.curators };
 
 const FIXTURE_SHA = {
-  'wv3_explore_curators.json': '84ceb1e56ccba2995d8d2ee3845e600e379319cb4bdac5fc4f289e018a746b8b',
-  'wv3_explore_featured.json': '0f00cf7b529ee4c58d3fe96ee871443250d26cd2792c48c9c7cc43ed4174ba33',
-  'wv3_explore_feed.json': '314903a724c726d9a79162a1aa5321f38e2b3e1669dd13341f488ad46265601e',
-  'wv3_explore_following.json': 'e5be16dcd242c539939ede36e2a61eea756526305e8d67f3dc253296991ef1e2',
-  'wv3_explore_item.json': '6b77f6027c729b9a1f340a1a3e5a3be081b793032008d478bab361a9d80845fe',
+  'wv3_explore_curators.json': '40be6944f1c2b26bcaf4ae2fafdd1a042bb23f5ce250a3803de0b93939392d09',
+  'wv3_explore_featured.json': 'cb38f16db9aba8adbbf5426eca78ab87d4490f3fd9fe7b8c5f413ad39b9485d1',
+  'wv3_explore_feed.json': '99805dfef048282b75fc13b72dc0da99d4bd335325e884a2a13477209a5843e9',
+  'wv3_explore_following.json': 'aa52b41252627bab893affdd17a3bbc1116a2f6000c7256384d21490fdb9168e',
+  'wv3_explore_item.json': '483c64e310e7762cd8b2e5e399efc2b8df413911ff2a6027ce74e93c086a0fb5',
+  'wv3_explore_my_follows.json': '1fc99536bc89dc400871364362fabf28a0961a76283869be282accc8842523a1',
   'wv3_explore_v2_golden.json': 'f03776f66c3fce246cc80613176b6255bed145c3b8e03ee1ccf3324d42e83392'
 };
 const SOURCE = '/Volumes/SensieSSD/agent_tmp/worktrees/wv3-explore-sol/supabase/functions/statement-api/fixtures/';
@@ -150,8 +151,53 @@ test('a failed Load more keeps rows and cursor, shows the error with Try again, 
   assert.equal(renderEnd(st, { feed: [], feedCursor: null, feedError: true, curators: [] }), '');
 });
 
-test('explore.js retries a failed continuation from the unread cursor, not from the first page', () => {
-  assert.match(read('explore.js'), /retry === 'more'\) loadFeedPages\(data\.feedCursor\)/);
+// Pages 1..n of a feed whose requests can be made to fail from a given call on.
+function flakyFeed(failFrom) {
+  let n = 0;
+  return async (url) => {
+    n++;
+    if (n >= failFrom) return { ok: false, status: 503, json: async () => ({}) };
+    return { ok: true, status: 200, json: async () => ({ items: [{ slug: 'p' + n }], next_cursor: 'c' + n }) };
+  };
+}
+
+test('a failed continuation keeps rows and cursor, raises the error flag, and Try again resumes from that cursor', async () => {
+  // State after a first page that left an unread cursor.
+  const state = { feed: [{ slug: 'p1' }], feedCursor: 'c1', feedError: false };
+  // Load more fails.
+  await loadFeedInto(state, async () => ({ ok: false, status: 503, json: async () => ({}) }), 'https://api.test', state.feedCursor);
+  assert.deepEqual(state.feed.map((i) => i.slug), ['p1'], 'rows survive the failure');
+  assert.equal(state.feedCursor, 'c1', 'unread cursor survives the failure');
+  assert.equal(state.feedError, true, 'error flag is raised');
+  const st = { tab: 'all', curator: null };
+  assert.match(renderEnd(st, state), /data-retry="more"[^>]*>Try again/);
+  assert.doesNotMatch(renderEnd(st, state), /caught up/);
+  // Try again requests the page after the preserved cursor, then clears the error.
+  assert.equal(retryCursor(state), 'c1');
+  const urls = [];
+  await loadFeedInto(state, async (u) => { urls.push(u); return { ok: true, status: 200, json: async () => ({ items: [{ slug: 'p2' }], next_cursor: null }) }; }, 'https://api.test', retryCursor(state));
+  assert.ok(urls[0].includes('cursor=c1'), urls[0]);
+  assert.deepEqual(state.feed.map((i) => i.slug), ['p1', 'p2']);
+  assert.equal(state.feedCursor, null);
+  assert.equal(state.feedError, false);
+});
+
+test('a failed first page has no cursor, so Try again starts over from page one', async () => {
+  const state = { feed: [], feedCursor: null, feedError: false };
+  await loadFeedInto(state, flakyFeed(1), 'https://api.test', null);
+  assert.equal(state.feedError, true);
+  assert.equal(retryCursor(state), null);
+  assert.match(renderFeed({ tab: 'all', curator: null }, state), /data-retry="feed"/);
+});
+
+test('continuation failure under a curator filter with no matching rows retries from the cursor, not page one', () => {
+  const failed = { feed: feedRows.filter((r) => r.curator_id === A), feedCursor: 'c3', feedError: true, curators: REAL.curators };
+  const html = renderFeed({ tab: 'all', curator: B }, failed);
+  assert.match(html, /data-retry="more"/);
+  assert.doesNotMatch(html, /data-retry="feed"/);
+  assert.doesNotMatch(html, /No lines from this curator/);
+  // Without a preserved cursor the same view retries the first page.
+  assert.match(renderFeed({ tab: 'all', curator: B }, { ...failed, feedCursor: null }), /data-retry="feed"/);
 });
 
 // Minimal element double: closest() resolves through the parent chain like the DOM.
@@ -171,14 +217,46 @@ function node(attrs, parent = null) {
 test('focus restore keys on the stable list container, never an id-less parent', () => {
   const feed = node({ id: 'feed' });
   const wrap = node({}, feed);
-  assert.equal(focusSelector(node({ dataset: { retry: 'feed' } }, wrap)), '#feed [data-retry]');
+  assert.equal(focusSelector(node({ dataset: { retry: 'feed' } }, wrap)), '#feed [data-more], #feed [data-retry]');
   const end = node({ id: 'end' });
-  assert.equal(focusSelector(node({ dataset: { retry: 'more' } }, end)), '#end [data-retry]');
-  assert.equal(focusSelector(node({ more: true }, end)), '#end [data-more]');
+  assert.equal(focusSelector(node({ dataset: { retry: 'more' } }, end)), '#end [data-more], #end [data-retry]');
+  assert.equal(focusSelector(node({ more: true }, end)), '#end [data-more], #end [data-retry]');
   const strip = node({ id: 'strip' });
   assert.equal(focusSelector(node({ dataset: { who: 'abc' } }, strip)), '#strip [data-who="abc"]');
   assert.equal(focusSelector(node({}, end)), null);
   assert.equal(focusSelector(null), null);
+});
+
+// Document double: querySelector understands "#id [data-x], #id [data-y]" over a list of live controls.
+function pageWith(...controls) {
+  return { querySelector(sel) {
+    return controls.find((c) => sel.split(',').some((part) => {
+      const m = part.trim().match(/^#(\w+) \[(data-[a-z]+)\]$/);
+      return m && c.root === m[1] && c.attr === m[2];
+    })) || null;
+  } };
+}
+
+test('focus moves from Load more to Try again on the first failure, and stays on Try again on later failures', () => {
+  const end = node({ id: 'end' });
+  const keep = focusSelector(node({ more: true }, end));
+  // After the first failure #end holds Try again and no Load more.
+  const tryAgain = { root: 'end', attr: 'data-retry' };
+  assert.equal(pageWith(tryAgain).querySelector(keep), tryAgain);
+  // Activating Try again and failing again re-renders the same control.
+  const keep2 = focusSelector(node({ dataset: { retry: 'more' } }, end));
+  const tryAgain2 = { root: 'end', attr: 'data-retry' };
+  assert.equal(pageWith(tryAgain2).querySelector(keep2), tryAgain2);
+  // A retry that succeeds hands focus back to Load more when pages remain.
+  const more = { root: 'end', attr: 'data-more' };
+  assert.equal(pageWith(more).querySelector(keep2), more);
+});
+
+test('explore.js wires the shared failure handling and the focus restore', () => {
+  const src = read('explore.js');
+  assert.match(src, /loadFeedInto\(data, call, API, cursor\)/);
+  assert.match(src, /loadFeedPages\(retryCursor\(data\)\)/);
+  assert.match(src, /focusSelector\(document\.activeElement\)/);
 });
 
 test('featured null is a normal state', async () => {
