@@ -108,6 +108,17 @@ export function focusSelector(el) {
 
 const TABS = ['all', 'following'];
 // Arrow-key target for the tablist (ARIA tabs pattern); null for other keys.
+// Where a Tab key press inside the sheet must be redirected to keep focus in
+// it, or null to let the browser move on. `focusables` is every focusable
+// element in tab order (buttons and links alike).
+export function trapTarget(focusables, active, shift) {
+  const first = focusables[0], last = focusables[focusables.length - 1];
+  if (!first) return null;
+  if (shift && active === first) return last;
+  if (!shift && active === last) return first;
+  return null;
+}
+
 export function nextTab(current, key) {
   const i = TABS.indexOf(current);
   if (key === 'ArrowRight') return TABS[(i + 1) % TABS.length];

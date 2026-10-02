@@ -1,4 +1,4 @@
-import { selectItems, renderFeed, renderFilterText, renderCuratorList, renderStrip, renderSteps, renderHero, renderEnd, nextTab, focusSelector } from './explore-render.js';
+import { selectItems, renderFeed, renderFilterText, renderCuratorList, renderStrip, renderSteps, renderHero, renderEnd, nextTab, trapTarget, focusSelector } from './explore-render.js';
 import { getAccessToken, session } from '../session.js';
 import { renderCheckSheet } from '../home/home-render.js';
 import { sendToPhone, shareUrlFor, loadPhoneLinked } from '../home/home-data.js';
@@ -124,10 +124,8 @@ $('close').addEventListener('click', closeSheet);
 $('scrim').addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closeSheet(); return; }
   if (e.key !== 'Tab') return;
-  const f = $('scrim').querySelectorAll('button');
-  const first = f[0], last = f[f.length - 1];
-  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  const to = trapTarget([...$('scrim').querySelectorAll('button, a[href]')], document.activeElement, e.shiftKey);
+  if (to) { e.preventDefault(); to.focus(); }
 });
 
 async function load() {

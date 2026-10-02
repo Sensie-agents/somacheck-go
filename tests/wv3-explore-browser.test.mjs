@@ -227,6 +227,19 @@ await check('Check in sheet opens with the exact statement and closes on Escape'
   await page.close();
 });
 
+await check('keyboard Tab inside the Check in sheet reaches the QR universal link and wraps', async () => {
+  const { page } = await open(420);
+  await page.locator('.post').first().locator('[data-check]').click();
+  const seen = new Set();
+  for (let i = 0; i < 8; i++) {
+    await page.keyboard.press('Tab');
+    seen.add(await page.evaluate(() => document.activeElement.className || document.activeElement.id));
+  }
+  assert.ok([...seen].some((c) => /open-link/.test(c)), 'focus reached the link: ' + [...seen].join(', '));
+  assert.equal(await page.evaluate(() => document.getElementById('scrim').contains(document.activeElement)), true, 'focus never left the sheet');
+  await page.close();
+});
+
 for (const [name, width, act] of [
   ['mobile 420', 420, null], ['mobile 420 following signed out', 420, '#tab-following'], ['mobile 420 curator filter', 420, '#strip [data-who="' + B + '"]'],
   ['desktop 1280', 1280, null], ['desktop 1280 curator filter', 1280, '#cur-list [data-who="' + A + '"]']

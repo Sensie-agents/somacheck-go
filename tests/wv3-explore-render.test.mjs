@@ -4,7 +4,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { selectItems, renderFeed, renderEnd, focusSelector, nextTab, renderPost, renderCuratorList, renderStrip, renderFilterText, renderHero, PUBLIC_SIGNAL_LABEL } from '../world-vibe/explore/explore-render.js';
+import { selectItems, renderFeed, renderEnd, focusSelector, nextTab, trapTarget, renderPost, renderCuratorList, renderStrip, renderFilterText, renderHero, PUBLIC_SIGNAL_LABEL } from '../world-vibe/explore/explore-render.js';
 import { loadFeed, loadFeedInto, retryCursor, loadCurators, loadFeatured, loadFollowing } from '../world-vibe/explore/explore-data.js';
 import { getAccessToken } from '../world-vibe/session.js';
 
@@ -515,4 +515,16 @@ test('no "Prototype only" and no em dashes under world-vibe/explore', () => {
 
 test('every fixture statement starts with "I " or "My "', () => {
   for (const r of [...data.feed, ...data.following]) assert.match(r.statement, /^(I|My) /);
+});
+
+test('the sheet focus trap wraps over every focusable element, the QR universal link included', () => {
+  const close = { id: 'close' }, send = { id: 'send' }, link = { id: 'open-link' };
+  const all = [send, close, link];
+  assert.equal(trapTarget(all, send, true), link);
+  assert.equal(trapTarget(all, link, false), send, 'Tab from the link wraps to the first control');
+  assert.equal(trapTarget(all, close, false), null, 'Tab from a button is not stolen when the link follows it');
+  assert.equal(trapTarget([close], close, false), close);
+  assert.equal(trapTarget([], null, false), null);
+  const src = read('explore.js');
+  assert.match(src, /querySelectorAll\('button, a\[href\]'\)/, 'explore.js collects links as well as buttons');
 });
