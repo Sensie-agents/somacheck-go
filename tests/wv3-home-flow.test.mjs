@@ -4,11 +4,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createFlow } from '../world-vibe/home/home-flow.js';
-import { pickEnvelope, progressEnvelope, consentBody, phoneBody } from './helpers/captured.mjs';
+import { pickEnvelope, progressEnvelope, consentBody, phoneBody, sendOk, sendLinkRequired, draftsCreate, draftsConsentRequired } from './helpers/captured.mjs';
 
 const API = 'https://api.test';
-const RECEIPT = '33333333-3333-4333-8333-333333333333';
-const DRAFT = '44444444-4444-4444-8444-444444444444';
+const RECEIPT = sendOk.body.request_id;
+const DRAFT = draftsCreate.body.drafts[0].id;
 const res = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
 
 // A router whose responses can be held and released by hand.
@@ -44,7 +44,7 @@ test('sign-out clears the own reading, the receipt and every other piece of pers
   const h = harness({ routes: {
     ...base,
     'GET /v1/me/world-vibe/phone': res(200, phoneBody(true)),
-    'POST /v1/me/world-vibe/items/pick-one/ask': res(201, { request_id: RECEIPT, question: 'q', delivery: 'app_push', replayed: false }),
+    'POST /v1/me/world-vibe/items/pick-one/ask': res(sendOk.status, sendOk.body),
     'GET /v1/public/world-vibe/items/pick-one/progress': res(200, progressEnvelope({ slug: 'pick-one', revealed_by_you: true, your_reading: 'aligned' })),
     'GET /v1/me/world-vibe/consent': res(200, consentBody(true))
   } });
@@ -54,7 +54,7 @@ test('sign-out clears the own reading, the receipt and every other piece of pers
   assert.equal(h.st.receipt, RECEIPT);
   assert.equal(await h.flow.checkProgress(), true);
   assert.equal(h.st.progress.your_reading, 'aligned');
-  h.st.drafts = [{ id: DRAFT, statement: 'I need a real break.' }]; h.st.generated = true;
+  h.st.drafts = [draftsCreate.body.drafts[0]]; h.st.generated = true;
   await h.flow.loadConsent();
   assert.equal(h.st.consent, true);
 
@@ -73,7 +73,7 @@ test('sign-out clears the own reading, the receipt and every other piece of pers
 test('responses that resolve after sign-out are dropped: private drafts, consent, progress, phone link', async () => {
   const h = harness({ routes: {
     ...base,
-    'POST /v1/me/vibecheck/drafts': { hold: res(200, { drafts: [{ id: DRAFT, statement: 'I need a real break.' }] }) },
+    'POST /v1/me/vibecheck/drafts': { hold: res(200, draftsCreate.body) },
     'GET /v1/me/world-vibe/consent': { hold: res(200, consentBody(true)) },
     'GET /v1/me/world-vibe/phone': { hold: res(200, phoneBody(true)) },
     'GET /v1/public/world-vibe/items/pick-one/progress': { hold: res(200, progressEnvelope({ slug: 'pick-one', revealed_by_you: true, your_reading: 'unaligned' })) }
@@ -97,7 +97,7 @@ test('responses that resolve after sign-out are dropped: private drafts, consent
 });
 
 test('consent off: "A few words from me" generates; the agent source never reaches the route', async () => {
-  const h = harness({ routes: { ...base, 'POST /v1/me/vibecheck/drafts': res(200, { drafts: [{ id: DRAFT, statement: 'I need a real break.' }] }) } });
+  const h = harness({ routes: { ...base, 'POST /v1/me/vibecheck/drafts': res(200, draftsCreate.body) } });
   h.st.consent = false;
   h.st.pctx = 'agent';
   await h.flow.generate('');
@@ -120,7 +120,7 @@ test('words with nothing typed is not sent, with consent on or off', async () =>
 });
 
 test('a 403 consent_required on the agent source turns the local flag off', async () => {
-  const h = harness({ routes: { ...base, 'POST /v1/me/vibecheck/drafts': res(403, { error: 'consent_required' }) } });
+  const h = harness({ routes: { ...base, 'POST /v1/me/vibecheck/drafts': res(draftsConsentRequired.status, draftsConsentRequired.body) } });
   h.st.consent = true; h.st.pctx = 'agent';
   await h.flow.generate('');
   assert.equal(h.st.consent, false);
@@ -131,9 +131,9 @@ test('lane switch mid-poll: a shared result never labels a private draft as save
   const progressBody = progressEnvelope({ slug: 'pick-one', revealed_by_you: true, your_reading: 'aligned' });
   const h = harness({ routes: {
     ...base,
-    'POST /v1/me/world-vibe/items/pick-one/ask': res(201, { request_id: RECEIPT, question: 'q', delivery: 'app_push', replayed: false }),
+    'POST /v1/me/world-vibe/items/pick-one/ask': res(sendOk.status, sendOk.body),
     'GET /v1/public/world-vibe/items/pick-one/progress': { hold: res(200, progressBody) },
-    'POST /v1/me/vibecheck/drafts': res(200, { drafts: [{ id: DRAFT, statement: 'I need a real break.' }] })
+    'POST /v1/me/vibecheck/drafts': res(200, draftsCreate.body)
   } });
   await h.flow.showPick();
   await h.flow.sendShared();
@@ -155,7 +155,7 @@ test('lane switch mid-poll: a shared result never labels a private draft as save
 test('moving to another item mid-poll drops the old item\'s progress', async () => {
   const h = harness({ routes: {
     'GET /v1/public/world-vibe/pick': (init, u) => res(200, u.searchParams.get('exclude') ? pickEnvelope('most_checked', { slug: 'pick-two', statement: 'I feel ready for Monday.' }) : PICK),
-    'POST /v1/me/world-vibe/items/pick-one/ask': res(201, { request_id: RECEIPT, question: 'q', delivery: 'app_push', replayed: false }),
+    'POST /v1/me/world-vibe/items/pick-one/ask': res(sendOk.status, sendOk.body),
     'GET /v1/public/world-vibe/items/pick-one/progress': { hold: res(200, progressEnvelope({ slug: 'pick-one' })) }
   } });
   await h.flow.showPick();
@@ -174,7 +174,7 @@ test('a private ask that resolves after a lane switch does not touch the shared 
   const h = harness({ routes: { ...base, ['POST /v1/me/vibecheck/drafts/' + DRAFT + '/ask']: { hold: res(201, { request_id: 'rq-9', source: 'world_vibe_private', status: 'pending' }) } } });
   await h.flow.showPick();
   h.flow.selectLane('private');
-  h.st.drafts = [{ id: DRAFT, statement: 'I need a real break.' }]; h.st.generated = true;
+  h.st.drafts = [draftsCreate.body.drafts[0]]; h.st.generated = true;
   const send = h.flow.sendPrivate(); await flush();
   h.flow.selectLane('shared');
   await h.release('POST /v1/me/vibecheck/drafts/' + DRAFT + '/ask');
@@ -186,7 +186,7 @@ test('Send to my phone: a 422 link_required after the route said linked falls ba
   const h = harness({ routes: {
     ...base,
     'GET /v1/me/world-vibe/phone': res(200, phoneBody(true)),
-    'POST /v1/me/world-vibe/items/pick-one/ask': res(422, { error: 'link_required' })
+    'POST /v1/me/world-vibe/items/pick-one/ask': res(sendLinkRequired.status, sendLinkRequired.body)
   } });
   await h.flow.showPick();
   await h.flow.openCheck();
@@ -214,7 +214,7 @@ const PROGRESS1 = 'GET /v1/public/world-vibe/items/pick-one/progress';
 const CONSENT_GET = 'GET /v1/me/world-vibe/consent';
 const CONSENT_PUT = 'PUT /v1/me/world-vibe/consent';
 const DRAFTS = 'POST /v1/me/vibecheck/drafts';
-const sent = res(201, { request_id: RECEIPT, question: 'q', delivery: 'app_push', replayed: false });
+const sent = res(sendOk.status, sendOk.body);
 
 test('pick: an older pick response arriving after a newer one is dropped', async () => {
   let n = 0;
@@ -253,6 +253,34 @@ test('consent write: a PUT that resolves after sign-out is dropped', async () =>
   await h.release(CONSENT_PUT);
   await writing;
   assert.equal(h.st.consent, null);
+});
+
+// A read that starts while a write is pending, and answers first, must not stand
+// in for the write: the write's own outcome always lands.
+test('consent: a GET that resolves while a PUT is pending does not discard the PUT success', async () => {
+  const h = harness({ routes: { ...base, [CONSENT_GET]: res(200, consentBody(false)), [CONSENT_PUT]: { hold: res(200, consentBody(true)) } } });
+  const writing = h.flow.toggleConsent(true); await flush();
+  h.flow.selectLane('private'); await flush();       // the newer GET answers false first
+  await h.release(CONSENT_PUT); await writing;
+  assert.equal(h.st.consent, true);
+  assert.equal(h.st.perror, null);
+});
+
+test('consent: a failed PUT (500) is shown even though a newer GET resolved first', async () => {
+  const h = harness({ routes: { ...base, [CONSENT_GET]: res(200, consentBody(true)), [CONSENT_PUT]: { hold: res(500, {}) } } });
+  const writing = h.flow.toggleConsent(false); await flush();
+  h.flow.selectLane('private'); await flush();
+  await h.release(CONSENT_PUT); await writing;
+  assert.equal(h.st.perror, 'consent_unavailable');
+});
+
+test('consent: a 401 on the PUT signs out even though a newer GET resolved first', async () => {
+  const h = harness({ routes: { ...base, [CONSENT_GET]: res(200, consentBody(true)), [CONSENT_PUT]: { hold: res(401, {}) } } });
+  const writing = h.flow.toggleConsent(false); await flush();
+  h.flow.selectLane('private'); await flush();
+  assert.equal(h.st.consent, true);
+  await h.release(CONSENT_PUT); await writing;
+  assert.equal(h.st.consent, null, 'sign-out cleared the personal state');
 });
 
 test('consent write: of two writes the newer one decides, even when the older resolves last', async () => {
@@ -317,7 +345,7 @@ test('progress: a response that resolves after the lane moved to private is drop
 });
 
 test('drafts: a generate that resolves after the lane moved on does not store the drafts', async () => {
-  const h = harness({ routes: { ...base, [DRAFTS]: { hold: res(200, { drafts: [{ id: DRAFT, statement: 'I need a real break.' }] }) } } });
+  const h = harness({ routes: { ...base, [DRAFTS]: { hold: res(200, draftsCreate.body) } } });
   await h.flow.showPick();
   h.flow.selectLane('private');
   h.st.consent = true; h.st.pctx = 'words';
@@ -334,7 +362,7 @@ test('private ask: an ask that resolves after sign-out does not mark the line se
   const h = harness({ routes: { ...base, [ASK]: { hold: res(201, { request_id: 'rq-9', source: 'world_vibe_private', status: 'pending' }) } } });
   await h.flow.showPick();
   h.flow.selectLane('private');
-  h.st.drafts = [{ id: DRAFT, statement: 'I need a real break.' }]; h.st.generated = true;
+  h.st.drafts = [draftsCreate.body.drafts[0]]; h.st.generated = true;
   const asking = h.flow.sendPrivate(); await flush();
   h.signOut();
   await h.release(ASK);

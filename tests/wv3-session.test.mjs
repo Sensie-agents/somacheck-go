@@ -287,3 +287,64 @@ test('sign-out while the code exchange is in flight: the late exchange does not 
   assert.equal(storage.getItem(SESSION_KEY), null);
   assert.equal(s.getAccessToken(), null);
 });
+
+// Two tabs: separate session objects over one shared storage, as with localStorage.
+const twoTabs = async (hold) => {
+  const storage = memory();
+  const clock = { t: NOW };
+  const tab = (fetch) => createSession({ fetch, storage, supabaseUrl: SB, publishableKey: KEY, origin: 'https://go.test', crypto: globalThis.crypto, now: () => clock.t });
+  const fa = heldGotrue(hold);
+  const a = tab(fa);
+  const b = tab(gotrue());
+  return { a, b, fa, storage, clock };
+};
+
+test('sign-out in another tab while this tab\'s refresh is in flight: the late refresh restores nothing', async () => {
+  const { a, b, fa, storage, clock } = await twoTabs('refresh_token');
+  await a.signIn('me@x.test');
+  await a.completeSignIn('?code=abc');
+  clock.t = NOW + 3590 * 1000;
+  const restoring = a.restore();
+  await new Promise((r) => setTimeout(r, 0));
+  await b.signOut();
+  await fa.releaseAll();
+  await restoring;
+  assert.equal(storage.getItem(SESSION_KEY), null);
+  assert.equal(a.getAccessToken(), null);
+  assert.equal(b.getAccessToken(), null);
+});
+
+test('sign-out in another tab while this tab completes a PKCE sign-in: the late exchange signs nobody in', async () => {
+  const { a, b, fa, storage } = await twoTabs('pkce');
+  await a.signIn('me@x.test');
+  const completing = a.completeSignIn('?code=abc');
+  await new Promise((r) => setTimeout(r, 0));
+  await b.signOut();
+  await fa.releaseAll();
+  assert.deepEqual(await completing, { error: 'signed_out' });
+  assert.equal(storage.getItem(SESSION_KEY), null);
+  assert.equal(a.getAccessToken(), null);
+});
+
+test('a sign-out that finished before the refresh began does not block it (the marker is compared, not just present)', async () => {
+  const { a, b, fa, storage, clock } = await twoTabs('refresh_token');
+  await a.signIn('me@x.test');
+  await a.completeSignIn('?code=abc');
+  await b.signOut();
+  await b.signIn('me@x.test');
+  await b.completeSignIn('?code=abc');
+  clock.t = NOW + 3590 * 1000;
+  const restoring = a.restore();
+  await new Promise((r) => setTimeout(r, 0));
+  await fa.releaseAll();
+  await restoring;
+  assert.equal(JSON.parse(storage.getItem(SESSION_KEY)).access_token, 'late-access');
+});
+
+test('notify() tells listeners the shared storage changed (the window storage event lands here)', () => {
+  const { s } = make();
+  let n = 0;
+  s.onChange(() => { n++; });
+  s.notify();
+  assert.equal(n, 1);
+});

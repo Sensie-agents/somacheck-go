@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { extendExcludes, loadPick, loadProgress, sendToPhone, generateDrafts, askPrivate, getConsent, setConsent, loadPhoneLinked, loadItem, itemSlugFromSearch, shareUrlFor, MAX_EXCLUDES } from '../world-vibe/home/home-data.js';
-import { pickEnvelope, progressEnvelope, feedRow, consentBody, phoneBody, itemRow } from './helpers/captured.mjs';
+import { pickEnvelope, progressEnvelope, feedRow, consentBody, phoneBody, itemRow, pickSignedIn, sendOk, sendLinkRequired, draftsCreate, draftsConsentRequired } from './helpers/captured.mjs';
 
 const API = 'https://api.test';
 const res = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
@@ -23,7 +23,7 @@ test('pick: merges the item with its reason and sends tz', async () => {
   const r = await loadPick(f, API, { tz: 'America/New_York' });
   assert.equal(r.error, null);
   assert.equal(r.pick.reason, 'following');
-  assert.equal(r.pick.slug, feedRow.slug);
+  assert.equal(r.pick.slug, pickSignedIn.item.slug);
   assert.equal(new URL(f.calls[0].url).pathname, '/v1/public/world-vibe/pick');
   assert.equal(new URL(f.calls[0].url).searchParams.get('tz'), 'America/New_York');
 });
@@ -107,17 +107,17 @@ test('send to phone: no token means no request', async () => {
 });
 
 test('send to phone: POSTs to the item ask route with the bearer', async () => {
-  const f = recorder(() => res(201, { request_id: 'rq-1', question: 'I feel ready for this', delivery: 'app_push', replayed: false }));
+  const f = recorder(() => res(sendOk.status, sendOk.body));
   const r = await sendToPhone(f, API, 'wv3-r2-named', 'tok');
-  assert.deepEqual(r, { status: 'sent', requestId: 'rq-1', replayed: false });
+  assert.deepEqual(r, { status: 'sent', requestId: sendOk.body.request_id, replayed: false });
   assert.equal(new URL(f.calls[0].url).pathname, '/v1/me/world-vibe/items/wv3-r2-named/ask');
   assert.equal(f.calls[0].init.method, 'POST');
   assert.equal(auth(f.calls[0]), 'Bearer tok');
 });
 
 test('send to phone: a replay (200) still returns the receipt', async () => {
-  const r = await sendToPhone(recorder(() => res(200, { request_id: 'rq-1', question: 'q', delivery: 'app_push', replayed: true })), API, 'x', 't');
-  assert.deepEqual(r, { status: 'sent', requestId: 'rq-1', replayed: true });
+  const r = await sendToPhone(recorder(() => res(200, { ...sendOk.body, replayed: true })), API, 'x', 't');
+  assert.deepEqual(r, { status: 'sent', requestId: sendOk.body.request_id, replayed: true });
 });
 
 test('send to phone: every refusal maps to its own status', async () => {
@@ -130,7 +130,6 @@ test('share URL is the universal link with the slug', () => {
   assert.equal(shareUrlFor('wv3-r2-named'), 'https://go.somacheck.com/world-vibe/share/?item=wv3-r2-named');
 });
 
-const UUID = '22222222-2222-4222-8222-222222222222';
 test('drafts: signed out makes no request', async () => {
   const f = recorder(() => res(200, {}));
   assert.deepEqual(await generateDrafts(f, API, { source: 'agent' }, null), { error: 'signin' });
@@ -138,7 +137,7 @@ test('drafts: signed out makes no request', async () => {
 });
 
 test('drafts: agent source sends only the source; words source sends the words', async () => {
-  const f = recorder(() => res(200, { drafts: [{ id: UUID, statement: 'I need a real break.' }] }));
+  const f = recorder(() => res(draftsCreate.status, draftsCreate.body));
   await generateDrafts(f, API, { source: 'agent', words: 'ignored' }, 'tok');
   await generateDrafts(f, API, { source: 'words', words: 'a deadline' }, 'tok');
   assert.deepEqual(JSON.parse(f.calls[0].init.body), { source: 'agent' });
@@ -148,9 +147,9 @@ test('drafts: agent source sends only the source; words source sends the words',
 });
 
 test('drafts: returns the drafts; 403 is consent_required; 422 differs by source; bad bodies are unavailable', async () => {
-  const d = [{ id: UUID, statement: 'I need a real break.' }];
+  const d = draftsCreate.body.drafts;
   assert.deepEqual(await generateDrafts(recorder(() => res(200, { drafts: d })), API, { source: 'agent' }, 't'), { drafts: d });
-  assert.deepEqual(await generateDrafts(recorder(() => res(403, { error: 'consent_required' })), API, { source: 'agent' }, 't'), { error: 'consent_required' });
+  assert.deepEqual(await generateDrafts(recorder(() => res(draftsConsentRequired.status, draftsConsentRequired.body)), API, { source: 'agent' }, 't'), { error: 'consent_required' });
   assert.deepEqual(await generateDrafts(recorder(() => res(401, {})), API, { source: 'agent' }, 't'), { error: 'signin' });
   assert.deepEqual(await generateDrafts(recorder(() => res(422, {})), API, { source: 'agent' }, 't'), { error: 'no_context' });
   assert.deepEqual(await generateDrafts(recorder(() => res(422, {})), API, { source: 'words', words: 'x' }, 't'), { error: 'invalid_words' });
@@ -158,6 +157,7 @@ test('drafts: returns the drafts; 403 is consent_required; 422 differs by source
   assert.deepEqual(await generateDrafts(recorder(() => res(502, {})), API, { source: 'agent' }, 't'), { error: 'unavailable' });
 });
 
+const UUID = draftsCreate.body.drafts[0].id;
 test('private ask: POSTs the draft id with the bearer; nothing is sent signed out', async () => {
   const f = recorder(() => res(201, { request_id: 'rq-9', source: 'world_vibe_private', status: 'pending' }));
   assert.deepEqual(await askPrivate(f, API, UUID, 'tok'), { status: 'sent', requestId: 'rq-9' });

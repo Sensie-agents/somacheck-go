@@ -17,7 +17,11 @@ export function createFlow({ api, fetchFn, getToken, tz = 'UTC', arrivedFrom = n
   };
   let gen = 0;
   let pickSeq = 0;
-  let consentSeq = 0;   // reads and writes share it: only the newest request may set st.consent
+  // Consent is last-write-wins by WRITE sequence. A read applies only if no write
+  // started after it did and it is the newest read; a write's outcome (value,
+  // error, or sign-out) always lands unless a newer write superseded it.
+  let readSeq = 0;
+  let writeSeq = 0;
   let pollTimer = null;
 
   const currentLine = () => (st.drafts.length ? st.drafts[st.didx % st.drafts.length] : null);
@@ -126,9 +130,9 @@ export function createFlow({ api, fetchFn, getToken, tz = 'UTC', arrivedFrom = n
 
   async function loadConsent() {
     const still = signedGen();
-    const seq = ++consentSeq;
+    const rseq = ++readSeq, wseq = writeSeq;
     const r = await getConsent(fetchFn, api, getToken());
-    if (!still() || seq !== consentSeq) return;
+    if (!still() || rseq !== readSeq || wseq !== writeSeq) return;
     st.consent = r.consent;
     st.perror = r.error && r.error !== 'signin' ? 'consent_unavailable' : null;
     if (st.lane === 'private') ui.render();
@@ -136,12 +140,14 @@ export function createFlow({ api, fetchFn, getToken, tz = 'UTC', arrivedFrom = n
 
   async function toggleConsent(want) {
     const still = signedGen();
-    const seq = ++consentSeq;
+    const seq = ++writeSeq;
     const r = await setConsent(fetchFn, api, getToken(), want);
-    if (!still() || seq !== consentSeq) return;
+    if (!still()) return;
+    const expired = r.consent === null && r.error === 'signin';
+    if (seq !== writeSeq && !expired) return;
     if (r.consent === null) {
-      st.perror = r.error === 'signin' ? null : 'consent_unavailable';
-      if (r.error === 'signin') await ui.signOut();
+      st.perror = expired ? null : 'consent_unavailable';
+      if (expired) await ui.signOut();
     } else { st.consent = r.consent; st.perror = null; }
     ui.render();
     ui.focusConsent();
