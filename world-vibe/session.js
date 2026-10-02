@@ -24,6 +24,9 @@ export function safeNext(next) {
 
 export function createSession({ fetch: fetchFn, storage, supabaseUrl = DEFAULT_SUPABASE_URL, publishableKey = '', origin = 'https://go.somacheck.com', crypto: cryptoApi, now = () => Date.now() }) {
   const listeners = new Set();
+  // Bumped by every sign-out. A token exchange or refresh that started before
+  // it must not write a session back when its response arrives afterwards.
+  let epoch = 0;
   const read = () => {
     try { return JSON.parse(storage.getItem(SESSION_KEY)); } catch { return null; }
   };
@@ -66,12 +69,14 @@ export function createSession({ fetch: fetchFn, storage, supabaseUrl = DEFAULT_S
       const code = params.get('code');
       const verifier = storage.getItem(VERIFIER_KEY);
       if (!code || !verifier) return { error: 'no_pending_sign_in' };
+      const started = epoch;
       try {
         const r = await fetchFn(supabaseUrl + '/auth/v1/token?grant_type=pkce', {
           method: 'POST', headers: headers(), body: JSON.stringify({ auth_code: code, code_verifier: verifier })
         });
         if (!r.ok) return { error: 'exchange_failed' };
         const t = await r.json();
+        if (started !== epoch) return { error: 'signed_out' };
         storage.removeItem(VERIFIER_KEY);
         write({ access_token: t.access_token, refresh_token: t.refresh_token, expires_at: t.expires_at || Math.floor(now() / 1000) + (t.expires_in || 3600), user_id: t.user && t.user.id, email: t.user && t.user.email });
         return { ok: true, next: safeNext(params.get('next')) };
@@ -84,19 +89,23 @@ export function createSession({ fetch: fetchFn, storage, supabaseUrl = DEFAULT_S
       const s = read();
       if (!s) return;
       if (s.expires_at * 1000 - now() > REFRESH_WINDOW_SECONDS * 1000) return;
+      const started = epoch;
       try {
         const r = await fetchFn(supabaseUrl + '/auth/v1/token?grant_type=refresh_token', {
           method: 'POST', headers: headers(), body: JSON.stringify({ refresh_token: s.refresh_token })
         });
+        if (started !== epoch) return;
         if (!r.ok) { write(null); return; }
         const t = await r.json();
+        if (started !== epoch) return;
         write({ ...s, access_token: t.access_token, refresh_token: t.refresh_token || s.refresh_token, expires_at: t.expires_at || Math.floor(now() / 1000) + (t.expires_in || 3600) });
-      } catch { write(null); }
+      } catch { if (started === epoch) write(null); }
     },
 
     // Local sign-out always completes; the server revoke is best effort.
     async signOut() {
       const token = api.getAccessToken();
+      epoch++;
       write(null);
       storage.removeItem(VERIFIER_KEY);
       if (!token) return;

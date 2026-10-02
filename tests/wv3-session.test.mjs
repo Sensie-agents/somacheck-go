@@ -222,3 +222,68 @@ test('config.js ships the publishable key (public by design) and no secret of an
   assert.match(cfg, /SOMACHECK_SUPABASE_PUBLISHABLE_KEY = window\.SOMACHECK_SUPABASE_PUBLISHABLE_KEY \|\| 'sb_publishable_af-lUNI2FqEcb-oGy-4uxQ_cnm6kY85'/);
   assert.doesNotMatch(cfg, /sb_secret_|service_role|eyJ[A-Za-z0-9_-]{20,}/);
 });
+
+// Held GoTrue: the named grant resolves only when released, so a response can
+// land after sign-out.
+function heldGotrue(hold) {
+  const base = gotrue();
+  const waiting = [];
+  const f = async (url, init) => {
+    const u = new URL(url);
+    if (u.pathname === '/auth/v1/token' && u.searchParams.get('grant_type') === hold) {
+      base.calls.push({ url: String(url), init, body: JSON.parse(init.body) });
+      return new Promise((resolve) => waiting.push(() => resolve({ ok: true, status: 200, json: async () => ({ access_token: 'late-access', refresh_token: 'late-refresh', expires_in: 3600, user: { id: 'u-1', email: 'me@x.test' } }) })));
+    }
+    return base(url, init);
+  };
+  f.calls = base.calls;
+  f.releaseAll = async () => { waiting.splice(0).forEach((r) => r()); await new Promise((r) => setTimeout(r, 0)); };
+  return f;
+}
+const nearExpiry = async (fetch) => {
+  let clock = NOW;
+  const ctx = make({ fetch, now: () => clock });
+  await ctx.s.signIn('me@x.test');
+  await ctx.s.completeSignIn('?code=abc&next=%2Fworld-vibe%2F');
+  clock = NOW + 3590 * 1000;   // inside the 60 s refresh window
+  return ctx;
+};
+
+test('sign-out while a refresh is in flight: the late refresh response restores nothing', async () => {
+  const fetch = heldGotrue('refresh_token');
+  const { s, storage } = await nearExpiry(fetch);
+  const restoring = s.restore();
+  await new Promise((r) => setTimeout(r, 0));
+  await s.signOut();
+  await fetch.releaseAll();
+  await restoring;
+  assert.equal(storage.getItem(SESSION_KEY), null);
+  assert.equal(s.getAccessToken(), null);
+});
+
+test('a refresh that resolves after sign-out has finished never brings the bearer back', async () => {
+  const fetch = heldGotrue('refresh_token');
+  const { s, storage } = await nearExpiry(fetch);
+  const restoring = s.restore();
+  await new Promise((r) => setTimeout(r, 0));
+  await s.signOut();
+  assert.equal(s.getAccessToken(), null);
+  await fetch.releaseAll();
+  await restoring;
+  assert.equal(s.getAccessToken(), null);
+  assert.equal(s.userId(), null);
+  assert.equal(storage.getItem(SESSION_KEY), null);
+});
+
+test('sign-out while the code exchange is in flight: the late exchange does not sign the person in', async () => {
+  const fetch = heldGotrue('pkce');
+  const { s, storage } = make({ fetch });
+  await s.signIn('me@x.test');
+  const completing = s.completeSignIn('?code=abc');
+  await new Promise((r) => setTimeout(r, 0));
+  await s.signOut();
+  await fetch.releaseAll();
+  assert.deepEqual(await completing, { error: 'signed_out' });
+  assert.equal(storage.getItem(SESSION_KEY), null);
+  assert.equal(s.getAccessToken(), null);
+});
