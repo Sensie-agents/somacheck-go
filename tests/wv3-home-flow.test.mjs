@@ -283,6 +283,18 @@ test('consent: a 401 on the PUT signs out even though a newer GET resolved first
   assert.equal(h.st.consent, null, 'sign-out cleared the personal state');
 });
 
+test('consent write: a 401 on an older write still signs out after a newer write succeeded', async () => {
+  const gates = [];
+  const h = harness({ routes: { ...base, [CONSENT_PUT]: () => new Promise((resolve) => gates.push(resolve)) } });
+  const a = h.flow.toggleConsent(true); await flush();
+  const b = h.flow.toggleConsent(false); await flush();
+  gates[1](res(200, consentBody(false))); await flush();
+  assert.equal(h.st.consent, false);
+  gates[0](res(401, {})); await flush();
+  await Promise.all([a, b]);
+  assert.equal(h.st.consent, null, 'the expired sign-in cleared personal state');
+});
+
 test('consent write: of two writes the newer one decides, even when the older resolves last', async () => {
   const gates = [];
   const h = harness({ routes: { ...base, [CONSENT_PUT]: () => new Promise((resolve) => gates.push(resolve)) } });
