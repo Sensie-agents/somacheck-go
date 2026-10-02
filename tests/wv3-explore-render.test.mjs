@@ -4,8 +4,9 @@ import { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { selectItems, renderFeed, renderPost, renderCuratorList, renderStrip, renderFilterText, renderHero, PUBLIC_SIGNAL_LABEL } from '../world-vibe/explore/explore-render.js';
+import { selectItems, renderFeed, renderEnd, nextTab, renderPost, renderCuratorList, renderStrip, renderFilterText, renderHero, PUBLIC_SIGNAL_LABEL } from '../world-vibe/explore/explore-render.js';
 import { loadFeed, loadCurators, loadFeatured, loadFollowing } from '../world-vibe/explore/explore-data.js';
+import { getAccessToken } from '../world-vibe/explore/session.js';
 
 const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'world-vibe', 'explore');
 const read = (n) => readFileSync(path.join(dir, n), 'utf8');
@@ -41,8 +42,9 @@ const SOURCE = '/Volumes/SensieSSD/agent_tmp/worktrees/wv3-explore-sol/supabase/
 // A fetch double that records urls and answers with the real route envelopes.
 function fakeFetch(routes) {
   const urls = [];
-  const fn = async (url) => {
+  const fn = async (url, init) => {
     urls.push(url);
+    (fn.inits = fn.inits || []).push(init);
     const hit = Object.keys(routes).find((k) => url.includes(k));
     const r = hit ? routes[hit] : { status: 404, body: {} };
     const status = r.status || 200;
@@ -67,10 +69,10 @@ test('loaders call the real routes and unwrap their envelopes', async () => {
     '/v1/public/world-vibe/featured': { body: { featured: REAL.featured } },
     '/v1/me/world-vibe/following-feed': { body: { items: [REAL.following] } }
   });
-  assert.deepEqual(await loadFeed(f, 'https://api.test'), [REAL.feed]);
+  assert.deepEqual(await loadFeed(f, 'https://api.test'), { items: [REAL.feed], cursor: null });
   assert.deepEqual(await loadCurators(f, 'https://api.test'), REAL.curators);
   assert.deepEqual(await loadFeatured(f, 'https://api.test'), REAL.featured);
-  assert.deepEqual(await loadFollowing(f, 'https://api.test'), { items: [REAL.following], error: null });
+  assert.deepEqual(await loadFollowing(f, 'https://api.test', () => 'tok'), { items: [REAL.following], error: null });
   assert.deepEqual(f.urls, [
     'https://api.test/v1/public/world-vibe/feed',
     'https://api.test/v1/public/world-vibe/curators',
@@ -79,18 +81,93 @@ test('loaders call the real routes and unwrap their envelopes', async () => {
   ]);
 });
 
-test('feed follows next_cursor and stops when it is null', async () => {
-  const pages = [{ items: [row({ slug: 'p1' })], next_cursor: 'c1' }, { items: [row({ slug: 'p2' })], next_cursor: null }];
-  let n = 0;
-  const f = async (url) => ({ ok: true, status: 200, json: async () => pages[n++] , url });
-  assert.deepEqual((await loadFeed(f, 'x')).map((i) => i.slug), ['p1', 'p2']);
-  assert.equal(n, 2);
+// A cursor-addressed fake: a page is only served for the cursor in the URL, so
+// dropping or mangling the cursor parameter fails the call.
+function pagedFetch(pages, firstCursor = null) {
+  const urls = [];
+  const fn = async (url) => {
+    urls.push(url);
+    const q = new URL(url).searchParams.get('cursor');
+    const page = pages[q === null ? '' : q];
+    if (!page) return { ok: false, status: 400, json: async () => ({}) };
+    return { ok: true, status: 200, json: async () => page };
+  };
+  fn.urls = urls;
+  return fn;
+}
+const chain = (n) => {
+  const pages = {};
+  for (let i = 1; i <= n; i++) pages[i === 1 ? '' : 'c' + (i - 1)] = { items: [row({ slug: 'p' + i })], next_cursor: i < n ? 'c' + i : null };
+  return pages;
+};
+
+test('feed forwards the cursor query parameter and stops when it is null', async () => {
+  const f = pagedFetch(chain(2));
+  const r = await loadFeed(f, 'https://api.test');
+  assert.deepEqual(r.items.map((i) => i.slug), ['p1', 'p2']);
+  assert.equal(r.cursor, null);
+  assert.deepEqual(f.urls, ['https://api.test/v1/public/world-vibe/feed', 'https://api.test/v1/public/world-vibe/feed?cursor=c1']);
 });
 
-test('featured null is a normal state; following 401 reads as signed out', async () => {
+test('feed keeps paginating past five pages until the cursor is null', async () => {
+  const f = pagedFetch(chain(8));
+  const r = await loadFeed(f, 'https://api.test');
+  assert.equal(r.items.length, 8);
+  assert.equal(r.cursor, null);
+});
+
+test('hitting the page cap returns the unread cursor; Load more continues from it', async () => {
+  const f = pagedFetch(chain(8));
+  const r = await loadFeed(f, 'https://api.test', { maxPages: 3 });
+  assert.deepEqual(r.items.map((i) => i.slug), ['p1', 'p2', 'p3']);
+  assert.equal(r.cursor, 'c3');
+  const more = await loadFeed(f, 'https://api.test', { cursor: r.cursor, maxPages: 3 });
+  assert.deepEqual(more.items.map((i) => i.slug), ['p4', 'p5', 'p6']);
+  assert.equal(more.cursor, 'c6');
+});
+
+test('"all caught up" is shown only when no cursor remains; otherwise Load more', () => {
+  const st = { tab: 'all', curator: null };
+  assert.match(renderEnd(st, { ...data, feedCursor: 'c3' }), /data-more[^>]*>Load more/);
+  assert.doesNotMatch(renderEnd(st, { ...data, feedCursor: 'c3' }), /caught up/);
+  assert.equal(renderEnd(st, { ...data, feedCursor: null }), "You're all caught up.");
+  // A curator filter over a partly loaded feed must not claim completeness either.
+  assert.match(renderEnd({ tab: 'all', curator: 'nobody' }, { ...data, feedCursor: 'c3' }), /Load more/);
+  assert.equal(renderEnd({ tab: 'following', curator: null }, { ...data, feedCursor: 'c3' }), "You're all caught up.");
+});
+
+test('featured null is a normal state', async () => {
   assert.equal(await loadFeatured(fakeFetch({ '/featured': { body: { featured: null } } }), 'x'), null);
-  assert.deepEqual(await loadFollowing(fakeFetch({ '/following-feed': { status: 401, body: {} } }), 'x'), { items: [], error: 'auth' });
-  assert.deepEqual(await loadFollowing(fakeFetch({ '/following-feed': { status: 500, body: {} } }), 'x'), { items: [], error: 'unavailable' });
+});
+
+test('session: getAccessToken is null until WP12 wires Supabase Auth', () => {
+  assert.equal(getAccessToken(), null);
+});
+
+test('following with a token sends Authorization: Bearer on the following-feed request', async () => {
+  const f = fakeFetch({ '/following-feed': { body: { items: [REAL.following] } } });
+  await loadFollowing(f, 'https://api.test', () => 'tok-123');
+  assert.equal(f.urls.length, 1);
+  assert.equal(f.inits[0].headers.Authorization, 'Bearer tok-123');
+});
+
+test('following without a token makes no request and reports signin', async () => {
+  const f = fakeFetch({ '/following-feed': { body: { items: [REAL.following] } } });
+  assert.deepEqual(await loadFollowing(f, 'x', () => null), { items: [], error: 'signin' });
+  assert.deepEqual(await loadFollowing(f, 'x'), { items: [], error: 'signin' });
+  assert.equal(f.urls.length, 0);
+});
+
+test('following 401 reads as auth, 500 and network failure as unavailable', async () => {
+  const tok = () => 't';
+  assert.deepEqual(await loadFollowing(fakeFetch({ '/following-feed': { status: 401, body: {} } }), 'x', tok), { items: [], error: 'auth' });
+  assert.deepEqual(await loadFollowing(fakeFetch({ '/following-feed': { status: 500, body: {} } }), 'x', tok), { items: [], error: 'unavailable' });
+  assert.deepEqual(await loadFollowing(async () => { throw new TypeError('network'); }, 'x', tok), { items: [], error: 'unavailable' });
+});
+
+test('explore.js forwards the fetch init (headers) and passes the session token getter to loadFollowing', () => {
+  assert.match(read('explore.js'), /const call = \(url, init\) => fetch\(url, init\);/);
+  assert.match(read('explore.js'), /loadFollowing\(call, API, getAccessToken\)/);
 });
 
 test('curator filter is keyed on curator_id: two curators named Alex never merge', () => {
@@ -138,14 +215,58 @@ test('Following reveal ladder on the real 12-of-20 row: dots, no lean, no percen
   assert.doesNotMatch(t, /%|Leans|Mixed/);
 });
 
-test('Following empty and signed-out states', () => {
-  assert.match(text(renderFeed({ tab: 'following', curator: null }, { ...data, following: [] })), /Follow a curator/);
-  assert.match(text(renderFeed({ tab: 'following', curator: null }, { ...data, following: [], followingError: 'auth' })), /Sign in/);
+const followingOf = (over) => renderFeed({ tab: 'following', curator: null }, { ...data, following: [], ...over });
+
+test('Following empty state only when the load succeeded with no rows', () => {
+  assert.match(text(followingOf({})), /Follow a curator/);
 });
 
-test('a curator with no lines shows an empty message; a feed load failure is stated, not blank', () => {
+test('Following signed out (no token) or 401 renders the sign-in state with a disabled placeholder, never rows', () => {
+  for (const followingError of ['signin', 'auth']) {
+    const html = followingOf({ followingError, following: [REAL.following] });
+    assert.match(text(html), /Sign in to see who you follow/);
+    assert.match(html, /<button[^>]*class="signin"[^>]*disabled/);
+    assert.deepEqual(slugs(html), []);
+    assert.doesNotMatch(text(html), /Follow a curator/);
+  }
+});
+
+test('Following 500 or network failure renders an error with Try again, never "Follow a curator"', () => {
+  const html = followingOf({ followingError: 'unavailable' });
+  assert.match(text(html), /Couldn't load who you follow/);
+  assert.match(html, /data-retry="following"[^>]*>Try again/);
+  assert.doesNotMatch(text(html), /Follow a curator|No lines|Sign in/);
+});
+
+test('feed failure renders an error before and after a curator filter, never "No lines"', () => {
+  for (const curator of [null, A]) {
+    const html = renderFeed({ tab: 'all', curator }, { ...data, feed: [], feedError: true });
+    assert.match(text(html), /Couldn't load lines/);
+    assert.match(html, /data-retry="feed"[^>]*>Try again/);
+    assert.doesNotMatch(text(html), /No lines/);
+  }
+});
+
+test('a curator with no lines shows an empty message when the feed loaded', () => {
   assert.match(text(renderFeed({ tab: 'all', curator: 'nobody' }, data)), /No lines from this curator/);
-  assert.match(text(renderFeed({ tab: 'all', curator: null }, { ...data, feed: [], feedError: true })), /Could not load lines/);
+  assert.match(text(renderFeed({ tab: 'all', curator: null }, { ...data, feed: [] })), /No lines here yet/);
+});
+
+test('nextTab follows the ARIA tabs arrow-key pattern', () => {
+  assert.equal(nextTab('all', 'ArrowRight'), 'following');
+  assert.equal(nextTab('following', 'ArrowRight'), 'all');
+  assert.equal(nextTab('all', 'ArrowLeft'), 'following');
+  assert.equal(nextTab('following', 'ArrowLeft'), 'all');
+  assert.equal(nextTab('following', 'Home'), 'all');
+  assert.equal(nextTab('all', 'End'), 'following');
+  assert.equal(nextTab('all', 'a'), null);
+});
+
+test('tabs start with roving tabindex (selected 0, other -1)', () => {
+  const html = read('index.html');
+  assert.match(html, /id="tab-all"[^>]*aria-selected="true" tabindex="0"/);
+  assert.match(html, /id="tab-following"[^>]*aria-selected="false" tabindex="-1"/);
+  assert.match(read('explore.js'), /t\.tabIndex = on \? 0 : -1/);
 });
 
 test('Topic of the Week hero renders the real /featured payload', () => {
@@ -253,7 +374,7 @@ test('How it works exists in both layouts (fold under 1000px, side panel above)'
 });
 
 test('no "Prototype only" and no em dashes under world-vibe/explore', () => {
-  for (const f of ['index.html', 'explore.js', 'explore-render.js', 'explore-data.js', 'explore.css']) {
+  for (const f of ['index.html', 'explore.js', 'explore-render.js', 'explore-data.js', 'explore.css', 'session.js']) {
     const s = read(f);
     assert.doesNotMatch(s, /Prototype only/i, f);
     assert.ok(!s.includes('\u2014'), 'em dash in ' + f);

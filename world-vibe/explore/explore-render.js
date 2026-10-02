@@ -29,7 +29,7 @@ const safeHref = (u) => (typeof u === 'string' && /^https?:\/\//i.test(u) ? u : 
 // public-signal row never matches: its curator_id is hidden and ignored here.
 export function selectItems(state, data) {
   if (state.curator) return (data.feed || []).filter((i) => i.public_signals !== true && typeof i.curator_id === 'string' && i.curator_id === state.curator);
-  if (state.tab === 'following') return data.following || [];
+  if (state.tab === 'following') return data.followingError ? [] : data.following || [];
   return data.feed || [];
 }
 
@@ -55,17 +55,43 @@ export function renderPost(item) {
     '</div></article>';
 }
 
+const retry = (what) => '<button class="retry" type="button" data-retry="' + what + '">Try again</button>';
+const errorBox = (msg, what) => '<div class="end" role="alert">' + msg + ' ' + retry(what) + '</div>';
+
 export function renderFeed(state, data) {
   const items = selectItems(state, data);
   if (items.length) return items.map(renderPost).join('');
-  if (state.curator) return '<p class="end">No lines from this curator right now.</p>';
-  if (data.feedError && state.tab !== 'following') return '<p class="end">Could not load lines right now. Try again in a moment.</p>';
-  if (state.tab === 'following') {
-    return data.followingError === 'auth'
-      ? '<p class="end">Sign in in the SomaCheck app to follow curators and see their lines here.</p>'
-      : '<p class="end">Follow a curator to see their lines here.</p>';
+  // A failed load is never reported as an empty state, before or after filtering.
+  if (state.curator || state.tab !== 'following') {
+    if (data.feedError) return errorBox("Couldn't load lines right now.", 'feed');
+    if (state.curator) return '<p class="end">No lines from this curator right now.</p>';
+    return '<p class="end">No lines here yet this week.</p>';
   }
-  return '<p class="end">No lines here yet this week.</p>';
+  if (data.followingError === 'signin' || data.followingError === 'auth') {
+    return '<div class="end" data-signin-state><p>Sign in to see who you follow.</p>' +
+      '<button class="signin" type="button" disabled aria-disabled="true">Sign in (coming soon)</button></div>';
+  }
+  if (data.followingError) return errorBox("Couldn't load who you follow right now.", 'following');
+  return '<p class="end">Follow a curator to see their lines here.</p>';
+}
+
+// Under the feed: "Load more" while pages remain, "all caught up" only when the
+// cursor is exhausted. The following list is not paged.
+export function renderEnd(state, data) {
+  if (state.tab === 'following' && !state.curator) return selectItems(state, data).length ? "You're all caught up." : '';
+  if (data.feedCursor && !data.feedError) return '<button class="more" type="button" data-more>Load more</button>';
+  return selectItems(state, data).length ? "You're all caught up." : '';
+}
+
+const TABS = ['all', 'following'];
+// Arrow-key target for the tablist (ARIA tabs pattern); null for other keys.
+export function nextTab(current, key) {
+  const i = TABS.indexOf(current);
+  if (key === 'ArrowRight') return TABS[(i + 1) % TABS.length];
+  if (key === 'ArrowLeft') return TABS[(i + TABS.length - 1) % TABS.length];
+  if (key === 'Home') return TABS[0];
+  if (key === 'End') return TABS[TABS.length - 1];
+  return null;
 }
 
 export function renderFilterText(state, curators = []) {

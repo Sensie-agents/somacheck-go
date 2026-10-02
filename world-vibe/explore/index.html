@@ -31,12 +31,12 @@
   </details>
 
   <div class="tabs" role="tablist" aria-label="Feed">
-    <button class="tab" type="button" role="tab" id="tab-all" aria-controls="feed" data-tab="all" aria-selected="true">For you</button>
-    <button class="tab" type="button" role="tab" id="tab-following" aria-controls="feed" data-tab="following" aria-selected="false">Following</button>
+    <button class="tab" type="button" role="tab" id="tab-all" aria-controls="feed" data-tab="all" aria-selected="true" tabindex="0">For you</button>
+    <button class="tab" type="button" role="tab" id="tab-following" aria-controls="feed" data-tab="following" aria-selected="false" tabindex="-1">Following</button>
   </div>
   <div class="filter" id="filter" hidden><span id="filter-text"></span><button type="button" id="clear">Show everyone</button></div>
   <div id="feed" role="tabpanel" aria-labelledby="tab-all"></div>
-  <p class="end" id="end">You're all caught up.</p>
+  <p class="end" id="end" hidden></p>
 
   <section class="stories m-only" aria-labelledby="cur-m">
     <h2 id="cur-m">Curators this week</h2>

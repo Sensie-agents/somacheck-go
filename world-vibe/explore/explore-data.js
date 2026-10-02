@@ -3,25 +3,25 @@
 // function so tests can replay the captured contract fixtures.
 export const DEFAULT_API = 'https://pbldcmniommltbdwuykk.supabase.co/functions/v1/statement-api';
 const PUBLIC = '/v1/public/world-vibe';
-const MAX_PAGES = 5;
+export const MAX_PAGES = 20;
 
-async function getJson(fetchFn, url) {
-  const r = await fetchFn(url);
+async function getJson(fetchFn, url, init) {
+  const r = await (init ? fetchFn(url, init) : fetchFn(url));
   if (!r.ok) { const e = new Error('http_' + r.status); e.status = r.status; throw e; }
   return r.json();
 }
 
-// feed_v3 pages: { items, next_cursor }
-export async function loadFeed(fetchFn, base) {
+// feed_v3 pages: { items, next_cursor }. Follows the cursor until it is null.
+// If maxPages is hit first, the unread cursor is returned so the caller can
+// offer "Load more" instead of claiming the feed is finished.
+export async function loadFeed(fetchFn, base, { cursor = null, maxPages = MAX_PAGES } = {}) {
   const items = [];
-  let cursor = null;
-  for (let page = 0; page < MAX_PAGES; page++) {
+  for (let page = 0; page < maxPages && (page === 0 || cursor); page++) {
     const body = await getJson(fetchFn, base + PUBLIC + '/feed' + (cursor ? '?cursor=' + encodeURIComponent(cursor) : ''));
     items.push(...(Array.isArray(body.items) ? body.items : []));
     cursor = body.next_cursor || null;
-    if (!cursor) break;
   }
-  return items;
+  return { items, cursor };
 }
 
 // { curators: [{ curator_id, display_name, lines_count, checkins_sparked }] }
@@ -36,10 +36,13 @@ export async function loadFeatured(fetchFn, base) {
   return body.featured || null;
 }
 
-// { items } for a signed-in caller; 401 means signed out.
-export async function loadFollowing(fetchFn, base) {
+// { items } for a signed-in caller. No token means no request at all and the
+// 'signin' state; a 401 with a token is 'auth'; anything else is 'unavailable'.
+export async function loadFollowing(fetchFn, base, getToken = () => null) {
+  const token = getToken();
+  if (!token) return { items: [], error: 'signin' };
   try {
-    const body = await getJson(fetchFn, base + '/v1/me/world-vibe/following-feed');
+    const body = await getJson(fetchFn, base + '/v1/me/world-vibe/following-feed', { headers: { Authorization: 'Bearer ' + token } });
     return { items: Array.isArray(body.items) ? body.items : [], error: null };
   } catch (e) {
     return { items: [], error: e.status === 401 ? 'auth' : 'unavailable' };

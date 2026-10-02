@@ -145,3 +145,5 @@ button{font:inherit;color:inherit;cursor:pointer}
 .progress b{color:var(--ink)}
 .dots.big i{width:13px;height:13px;border-width:2px}
 .micro{margin:-8px 0 0;text-align:center;font-size:13px;color:var(--ink3)}
+.end .retry,.end .signin,.end .more{margin-top:10px;padding:9px 16px;border:1px solid var(--line,#d8dde2);border-radius:999px;background:none;font:inherit;font-weight:600;color:var(--ink)}
+.end .signin[disabled]{color:var(--ink3);cursor:not-allowed}

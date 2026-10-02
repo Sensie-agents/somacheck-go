@@ -48,14 +48,25 @@ const check = async (name, fn) => {
 async function open(width, height = 900, opts = {}) {
   const page = await browser.newPage({ viewport: { width, height } });
   await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
-  await page.route(API + '/**', (route) => {
+  const headers = [];
+  await page.route(API + '/**', async (route) => {
     const u = route.request().url();
-    if (u.includes('/world-vibe/feed')) return respond(route, { items: FEED, next_cursor: null });
+    if (u.includes('/world-vibe/feed')) {
+      if (opts.paged) {
+        // 24 one-row pages: the first load stops at the 20 page cap, Load more reads the rest.
+        const n = Number((new URL(u).searchParams.get('cursor') || 'c0').slice(1)) + 1;
+        return respond(route, { items: [row({ slug: 'z-' + n, curator_id: B })], next_cursor: n < 24 ? 'c' + n : null });
+      }
+      return respond(route, { items: FEED, next_cursor: null });
+    }
     if (u.includes('/world-vibe/curators')) return respond(route, { curators: REAL.curators });
     if (u.includes('/world-vibe/featured')) return respond(route, { featured: opts.noFeatured ? null : REAL.featured });
-    if (u.includes('/following-feed')) return respond(route, { items: [REAL.following] });
+    if (u.includes('/following-feed')) headers.push(await route.request().allHeaders());
+    if (u.includes('/following-feed')) return respond(route, opts.followingStatus ? {} : { items: [REAL.following] }, opts.followingStatus || 200);
     return route.fulfill({ status: 404 });
   });
+  // No web session exists yet; a test can stand in a token by replacing session.js.
+  if (opts.token) await page.route('**/explore/session.js', (r) => r.fulfill({ contentType: 'text/javascript', body: 'export function getAccessToken(){return ' + JSON.stringify(opts.token) + ';}' }));
   await page.addInitScript((api) => { window.SOMACHECK_API_BASE = api; }, API);
   const requests = [];
   page.on('request', (r) => requests.push(r.url()));
@@ -63,7 +74,7 @@ async function open(width, height = 900, opts = {}) {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(url);
   await page.waitForSelector('.post');
-  return { page, requests, errors };
+  return { page, requests, errors, headers };
 }
 
 await check('Chrome callout hidden at 999px, visible at 1000px', async () => {
@@ -113,16 +124,89 @@ await check('Topic of the Week hero renders from /featured and is hidden when th
   await b.page.close();
 });
 
-await check('Following tab fetches the following-feed route and shows curator name and category', async () => {
-  const { page, requests } = await open(420);
+await check('Following with a token sends the bearer and shows curator name and category', async () => {
+  const { page, requests, headers } = await open(420, 900, { token: 'tok-1' });
   assert.ok(requests.some((u) => u.endsWith('/v1/public/world-vibe/feed')));
   assert.ok(!requests.some((u) => u.includes('following-feed')));
   await page.click('#tab-following');
-  await page.waitForSelector('.post');
-  assert.ok(requests.some((u) => u.endsWith('/v1/me/world-vibe/following-feed')));
+  await page.waitForSelector('.post .by b');
+  assert.equal(headers.length, 1);
+  assert.equal(headers[0].authorization, 'Bearer tok-1');
   assert.equal(await page.locator('.post').count(), 1);
   assert.equal(await page.locator('.post .by b').textContent(), 'Alex');
   assert.equal(await page.locator('.post .cat').textContent(), 'Politics');
+  await page.close();
+});
+
+await check('Following without a session makes no request and shows the sign-in state', async () => {
+  const { page, requests } = await open(420);
+  await page.click('#tab-following');
+  await page.waitForSelector('[data-signin-state]');
+  assert.ok(!requests.some((u) => u.includes('following-feed')));
+  assert.equal(await page.locator('.post').count(), 0);
+  assert.match(await page.locator('#feed').textContent(), /Sign in to see who you follow/);
+  assert.equal(await page.locator('#feed button.signin').isDisabled(), true);
+  await page.close();
+});
+
+await check('Following 401 with a token shows the sign-in state; 500 shows an error with Try again', async () => {
+  const a = await open(420, 900, { token: 't', followingStatus: 401 });
+  await a.page.click('#tab-following');
+  await a.page.waitForSelector('[data-signin-state]');
+  assert.equal(await a.page.locator('.post').count(), 0);
+  await a.page.close();
+  const b = await open(420, 900, { token: 't', followingStatus: 500 });
+  await b.page.click('#tab-following');
+  await b.page.waitForSelector('[data-retry="following"]');
+  assert.match(await b.page.locator('#feed').textContent(), /Couldn't load who you follow/);
+  assert.doesNotMatch(await b.page.locator('#feed').textContent(), /Follow a curator|No lines/);
+  await b.page.close();
+});
+
+await check('focus stays on the activated curator control after filtering', async () => {
+  const m = await open(420);
+  await m.page.focus('#strip [data-who="' + A + '"]');
+  await m.page.keyboard.press('Enter');
+  assert.equal(await m.page.evaluate(() => document.activeElement.dataset.who), A);
+  assert.equal(await m.page.evaluate(() => document.activeElement.closest('#strip') !== null), true);
+  await m.page.close();
+  const d = await open(1280);
+  await d.page.focus('#cur-list [data-who="' + B + '"]');
+  await d.page.keyboard.press('Space');
+  assert.equal(await d.page.evaluate(() => document.activeElement.dataset.who), B);
+  assert.equal(await d.page.evaluate(() => document.activeElement.closest('#cur-list') !== null), true);
+  await d.page.close();
+});
+
+await check('ARIA tabs: roving tabindex and arrow keys, Home and End', async () => {
+  const { page } = await open(420, 900, { token: 't' });
+  const state = () => page.evaluate(() => [...document.querySelectorAll('.tab')].map((t) => t.tabIndex + ':' + t.getAttribute('aria-selected')));
+  assert.deepEqual(await state(), ['0:true', '-1:false']);
+  await page.focus('#tab-all');
+  await page.keyboard.press('ArrowRight');
+  assert.deepEqual(await state(), ['-1:false', '0:true']);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'tab-following');
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'tab-all');
+  await page.keyboard.press('End');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'tab-following');
+  await page.keyboard.press('Home');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'tab-all');
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'tab-following');
+  await page.close();
+});
+
+await check('Load more appears at the page cap and appends the remaining pages', async () => {
+  const { page, requests } = await open(420, 900, { paged: true });
+  assert.equal(await page.locator('.post').count(), 20);
+  assert.equal(await page.locator('#end [data-more]').count(), 1);
+  assert.doesNotMatch(await page.locator('#end').textContent(), /caught up/);
+  await page.click('#end [data-more]');
+  await page.waitForSelector('[data-slug="z-24"]');
+  assert.ok(requests.some((u) => u.endsWith('/feed?cursor=c23')));
+  assert.equal(await page.locator('.post').count(), 24);
+  assert.equal(await page.locator('#end').textContent(), "You're all caught up.");
   await page.close();
 });
 
@@ -144,7 +228,7 @@ await check('Check in sheet opens with the exact statement and closes on Escape'
 });
 
 for (const [name, width, act] of [
-  ['mobile 420', 420, null], ['mobile 420 following', 420, '#tab-following'], ['mobile 420 curator filter', 420, '#strip [data-who="' + B + '"]'],
+  ['mobile 420', 420, null], ['mobile 420 following signed out', 420, '#tab-following'], ['mobile 420 curator filter', 420, '#strip [data-who="' + B + '"]'],
   ['desktop 1280', 1280, null], ['desktop 1280 curator filter', 1280, '#cur-list [data-who="' + A + '"]']
 ]) {
   await check('axe 0 serious/critical: ' + name, async () => {
