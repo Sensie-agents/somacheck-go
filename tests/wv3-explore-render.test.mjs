@@ -31,10 +31,10 @@ const data = { feed: feedRows, following: [REAL.following], curators: REAL.curat
 
 const FIXTURE_SHA = {
   'wv3_explore_curators.json': '40be6944f1c2b26bcaf4ae2fafdd1a042bb23f5ce250a3803de0b93939392d09',
-  'wv3_explore_featured.json': 'cb38f16db9aba8adbbf5426eca78ab87d4490f3fd9fe7b8c5f413ad39b9485d1',
-  'wv3_explore_feed.json': '99805dfef048282b75fc13b72dc0da99d4bd335325e884a2a13477209a5843e9',
-  'wv3_explore_following.json': 'aa52b41252627bab893affdd17a3bbc1116a2f6000c7256384d21490fdb9168e',
-  'wv3_explore_item.json': '483c64e310e7762cd8b2e5e399efc2b8df413911ff2a6027ce74e93c086a0fb5',
+  'wv3_explore_featured.json': 'a9d2bdd24039afbf11c74cd7239041d8ce089cbb72d6387ca544ced1a1c768ab',
+  'wv3_explore_feed.json': 'ab2f9618dfca8029506970a56edbf4007264b4183185c42535b64f76ed975732',
+  'wv3_explore_following.json': '4c9b644763857b4371fdb75fbc301adaef414592347002cf1f5b817d4daa3edd',
+  'wv3_explore_item.json': '6c95cc6ec2c5d6ceac3bb6b0a44050f0810692ede3e6ceb3648befb78b77a6c2',
   'wv3_explore_my_follows.json': '1fc99536bc89dc400871364362fabf28a0961a76283869be282accc8842523a1',
   'wv3_explore_v2_golden.json': 'f03776f66c3fce246cc80613176b6255bed145c3b8e03ee1ccf3324d42e83392'
 };
