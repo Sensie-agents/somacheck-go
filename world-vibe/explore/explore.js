@@ -1,5 +1,8 @@
 import { selectItems, renderFeed, renderFilterText, renderCuratorList, renderStrip, renderSteps, renderHero, renderEnd, nextTab, focusSelector } from './explore-render.js';
-import { getAccessToken } from './session.js';
+import { getAccessToken, session } from '../session.js';
+import { renderCheckSheet } from '../home/home-render.js';
+import { sendToPhone, shareUrlFor } from '../home/home-data.js';
+import { drawQr } from '../home/qr.js';
 import { DEFAULT_API, loadFeedInto, retryCursor, loadCurators, loadFeatured, loadFollowing } from './explore-data.js';
 
 const API = window.SOMACHECK_API_BASE || DEFAULT_API;
@@ -47,21 +50,47 @@ function selectTab(name) {
 
 const loadFeedPages = (cursor) => loadFeedInto(data, call, API, cursor);
 
-function openSheet(line) {
+const sheetState = { line: '', slug: '', linkRequired: false, sent: false, error: null };
+
+// The sheet is the same body as the home's: send to my phone only for a signed-in
+// account, the QR otherwise or when the account has no agent link.
+function drawSheet() {
+  $('sheet-body').innerHTML = renderCheckSheet({
+    statement: sheetState.line, slug: sheetState.slug, shareUrl: shareUrlFor(sheetState.slug), signedIn: Boolean(getAccessToken()),
+    linkRequired: sheetState.linkRequired, sent: sheetState.sent, error: sheetState.error, omitStatement: true, noProgress: true
+  });
+  drawQr();
+}
+function openSheet(line, slug) {
   lastFocus = document.activeElement;
+  Object.assign(sheetState, { line, slug, linkRequired: false, sent: false, error: null });
   $('sheet-line').textContent = line;
-  $('status').textContent = '';
+  drawSheet();
   $('scrim').hidden = false;
-  $('send').focus();
+  const f = $('sheet-body').querySelector('.btn-main') || $('close');
+  f.focus();
 }
 function closeSheet() {
   $('scrim').hidden = true;
   if (lastFocus && document.body.contains(lastFocus)) lastFocus.focus();
 }
 
+async function sendFromSheet() {
+  const r = await sendToPhone(call, API, sheetState.slug, getAccessToken());
+  sheetState.error = null;
+  if (r.status === 'sent') sheetState.sent = true;
+  else if (r.status === 'link_required') sheetState.linkRequired = true;
+  else sheetState.error = r.status;
+  drawSheet();
+  const f = $('sheet-body').querySelector('.btn-main') || $('sent');
+  if (f) f.focus();
+}
+
 document.addEventListener('click', (e) => {
   const c = e.target.closest('[data-check]');
-  if (c) { openSheet(c.dataset.check); return; }
+  if (c) { openSheet(c.dataset.check, (c.closest('[data-slug]') || c).dataset.slug); return; }
+  if (e.target.closest('#sheet-body [data-act="send"]')) { sendFromSheet(); return; }
+  if (e.target.closest('#sheet-body [data-open="signin"]')) { location.href = '/world-vibe/?signin=1'; return; }
   const w = e.target.closest('[data-who]');
   if (w) { st.curator = st.curator === w.dataset.who ? null : w.dataset.who; render(); return; }
   const t = e.target.closest('[data-tab]');
@@ -84,7 +113,6 @@ document.querySelector('[role="tablist"]').addEventListener('keydown', (e) => {
 });
 $('clear').addEventListener('click', () => { st.curator = null; render(); });
 $('close').addEventListener('click', closeSheet);
-$('send').addEventListener('click', () => { $('status').textContent = 'Sent. Open SomaCheck on your phone.'; });
 $('scrim').addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closeSheet(); return; }
   if (e.key !== 'Tab') return;
@@ -95,6 +123,7 @@ $('scrim').addEventListener('keydown', (e) => {
 });
 
 async function load() {
+  await session.restore();
   if (window.SOMACHECK_INSTALL_URL) $('get-app').href = window.SOMACHECK_INSTALL_URL;
   document.querySelectorAll('[data-steps]').forEach((el) => { el.innerHTML = renderSteps(); });
   // Each surface fails on its own: a missing hero or curator list never blanks the feed.

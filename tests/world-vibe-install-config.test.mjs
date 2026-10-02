@@ -12,7 +12,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 
 const [portalHtml, sharePageHtml, configJs] = await Promise.all([
-  readFile(path.join(root, 'world-vibe', 'index.html'), 'utf8'),
+  readFile(path.join(root, 'world-vibe', 'legacy', 'index.html'), 'utf8'),
   readFile(path.join(root, 'world-vibe', 'share', 'gut-vs-dashboard', 'index.html'), 'utf8'),
   readFile(path.join(root, 'world-vibe', 'config.js'), 'utf8')
 ]);

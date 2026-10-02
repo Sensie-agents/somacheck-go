@@ -1,107 +1,240 @@
-import { renderSharedCard, renderReveal, renderPrivateCard, esc } from './home-render.js';
+import { renderSharedCard, renderReveal, renderRoom, renderPrivateCard, renderEmpty, renderAccountBar, renderSignInSheet, renderCheckSheet, renderBringSheet, SIGNIN_STATUS } from './home-render.js';
+import { DEFAULT_API, extendExcludes, loadPick, loadProgress, sendToPhone, generateDrafts, askPrivate, getConsent, setConsent, shareUrlFor } from './home-data.js';
+import { session } from '../session.js';
+import { drawQr } from './qr.js';
 
-// WP5 runs on fixtures. WP6/WP9 replace load() with the real endpoints; the
-// render functions do not change.
-const PICKS = ['shared_link', 'topic_of_week', 'closest_to_unlock', 'time_of_day', 'trending_in_category', 'following', 'most_checked'];
+const API = window.SOMACHECK_API_BASE || DEFAULT_API;
+const call = (url, init) => fetch(url, init);
+const tz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; } })();
+const POLL_MS = 4000;
+const POLL_MAX = 40;
 
 const X = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A5159" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
-const QR = '<svg width="140" height="140" viewBox="0 0 29 29" role="img" aria-label="QR code placeholder" shape-rendering="crispEdges"><rect width="29" height="29" fill="#FFFFFF"/><path fill="#16181B" d="M1 1h7v7H1zM21 1h7v7h-7zM1 21h7v7H1z"/><path fill="#FFFFFF" d="M2 2h5v5H2zM22 2h5v5h-5zM2 22h5v5H2z"/><path fill="#16181B" d="M3 3h3v3H3zM23 3h3v3h-3zM3 23h3v3H3zM10 1h1v1h-1zM12 2h2v1h-2zM10 4h3v1h-3zM15 1h1v3h-1zM17 3h2v2h-2zM11 6h1v2h-1zM14 6h3v1h-3zM1 10h2v1H1zM4 11h3v1H4zM9 10h2v2H9zM12 9h1v3h-1zM15 10h3v1h-3zM19 9h2v2h-2zM23 10h3v1h-3zM2 13h1v2H2zM9 13h4v1H9zM17 13h2v2h-2zM24 13h2v2h-2zM1 17h3v1H1zM9 16h2v1H9zM12 17h3v2h-3zM18 17h3v1h-3zM23 16h1v3h-1zM10 20h1v2h-1zM13 21h2v1h-2zM17 20h1v3h-1zM20 21h3v1h-3zM10 24h3v1h-3zM14 25h1v3h-1zM16 24h2v1h-2zM22 26h3v1h-3zM26 23h2v2h-2z"/><circle cx="14.5" cy="14.5" r="3.4" fill="#FFFFFF"/><circle cx="14.5" cy="14.5" r="2.4" fill="none" stroke="#12A594" stroke-width=".6"/><circle cx="14.5" cy="14.5" r="1.1" fill="#F4B26B"/></svg>';
 
-const getJson = (name) => fetch('fixtures/' + name).then((r) => r.json());
-
-const st = { lane: 'shared', idx: 0, pidx: 0, phase: 'card', pctx: 'agent', pgenerated: false, picks: [], lines: [], progress: null };
+const st = {
+  lane: 'shared', phase: 'card', pick: null, pickError: false, excludes: [], arrivedFrom: new URLSearchParams(location.search).get('arrived_from'),
+  progress: null, mode: 'reveal', receipt: null, linkRequired: false, sent: false, sendError: null,
+  pctx: 'agent', drafts: [], didx: 0, generated: false, consent: null, perror: null, sheet: null
+};
 
 const slot = document.getElementById('slot');
 const scrim = document.getElementById('scrim');
 const sheet = document.getElementById('sheet');
 let lastFocus = null;
+let pollTimer = null;
 
-function currentPick() { return st.picks[st.idx % st.picks.length]; }
-function currentLine() { return st.lines[st.pidx % st.lines.length]; }
+const token = () => session.getAccessToken();
+const currentLine = () => (st.drafts.length ? st.drafts[st.didx % st.drafts.length] : null);
 
 function privateState() {
-  const phase = !st.pgenerated ? 'compose' : st.phase === 'done' ? 'done' : 'written';
-  return { phase, ctx: st.pctx, line: st.pgenerated ? currentLine() : '' };
+  const phase = !st.generated ? 'compose' : st.phase === 'done' ? 'done' : 'written';
+  const line = currentLine();
+  return { phase, ctx: st.pctx, line: st.generated && line ? line.statement : '', signedIn: Boolean(token()), consent: st.consent, error: st.perror };
 }
 
 function render() {
   document.querySelectorAll('[data-lane]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.lane === st.lane)));
   slot.setAttribute('aria-labelledby', 'tab-' + st.lane);
+  document.getElementById('account').innerHTML = renderAccountBar({ configured: session.configured(), email: session.email() });
   if (st.lane === 'shared') {
-    slot.innerHTML = st.phase === 'done' && st.progress ? renderReveal(st.progress) : renderSharedCard(currentPick());
+    if (st.phase === 'done' && st.progress) slot.innerHTML = st.mode === 'room' ? renderRoom(st.progress) : renderReveal(st.progress);
+    else slot.innerHTML = st.pick ? renderSharedCard(st.pick) : renderEmpty(st.pickError);
   } else {
     slot.innerHTML = renderPrivateCard(privateState());
   }
+}
+
+// After a card swap the old focus target is gone; park focus on the new card.
+function focusCard() {
+  const a = slot.querySelector('article');
+  if (a) { a.tabIndex = -1; a.focus(); }
+}
+
+async function showPick() {
+  const r = await loadPick(call, API, { exclude: st.excludes, tz, arrivedFrom: st.arrivedFrom, token: token() });
+  st.arrivedFrom = null;
+  st.pick = r.pick;
+  st.pickError = Boolean(r.error);
+  st.phase = 'card';
+  st.sent = false; st.sendError = null; st.receipt = null;
+  render();
 }
 
 function head(t) {
   return '<span class="grab" aria-hidden="true"></span><div class="sheet-head"><h2 id="sheet-title">' + t + '</h2><button class="x" type="button" data-act="close" aria-label="Close">' + X + '</button></div>';
 }
 
+function checkContext() {
+  const priv = st.lane === 'private';
+  return {
+    statement: priv ? (currentLine() || {}).statement : st.pick.statement,
+    slug: priv ? null : st.pick.slug,
+    shareUrl: priv ? null : shareUrlFor(st.pick.slug),
+    signedIn: Boolean(token()), linkRequired: st.linkRequired, sent: st.sent, error: st.sendError
+  };
+}
+
+function sheetHtml(kind) {
+  if (kind === 'check') return head('Check in on') + renderCheckSheet(checkContext());
+  if (kind === 'bring') return head('Bring your own line') + renderBringSheet();
+  if (kind === 'signin') return head('Sign in') + renderSignInSheet();
+  const S = [
+    ['Capture', 'Highlight any line on the web and write your take in one sentence.', 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4'],
+    ['Check in', 'Hold your phone for the 3-second gesture. Your body answers, not your thumbs.', 'M7 2.5h10v19H7zM11 18.5h2'],
+    ['See the vibe', 'At 3 people a lean appears. At 10, the full split. Never who.', 'M3 12h3l3-7 4 14 3-7h5']
+  ];
+  return head('How it works') + S.map((s) => '<div class="step"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + s[2] + '"/></svg></span><div><b>' + s[0] + '</b><span>' + s[1] + '</span></div></div>').join('') +
+    '<p class="fine left">Lines chosen for you always say why. We pick by relevance and by how close a line is to revealing, never to push a side.</p>';
+}
+
 function openSheet(kind) {
-  lastFocus = document.activeElement;
-  let html = '';
-  if (kind === 'check') {
-    const line = st.lane === 'shared' ? currentPick().statement : currentLine();
-    html = head('Check in on') + '<p class="big">' + esc(line) + '</p><button class="btn-main" type="button" data-act="send">Send to my phone</button><div class="fine sent" id="sent" role="status"></div><div class="or">or scan</div><div class="qr">' + QR + 'With your iPhone camera</div><p class="fine">Three seconds. Your body answers, not your thumbs.</p>';
-  } else if (kind === 'bring') {
-    html = head('Bring your own line') +
-      '<div class="chrome"><small>ON A COMPUTER</small><b>Highlight any line on the web and bring it here with one click.</b><a href="#">Add to Chrome</a></div>' +
-      '<div class="or">or paste it</div>' +
-      '<div class="field"><label for="b-url">Link to the article or post</label><input id="b-url" type="url" placeholder="https://"></div>' +
-      '<div class="field"><label for="b-line">Your line</label><textarea id="b-line" rows="2" maxlength="140" placeholder="I think..." aria-describedby="b-hint"></textarea><span class="hint" id="b-hint"><span id="b-msg">Start with I or My. Everyone checks their body against this.</span><span id="b-count">0 / 140</span></span></div>' +
-      '<fieldset><legend>Who sees it</legend><label class="radio"><input type="radio" name="vis" id="vis-all" checked>Everyone on World Vibe</label><label class="radio"><input type="radio" name="vis" id="vis-me">Just me</label></fieldset>' +
-      '<button class="btn-main" type="button" data-act="bring-send">Send to my phone</button><p class="fine">Your check-in counts first. A shared line appears on World Vibe after your gesture.</p>';
-  } else if (kind === 'how') {
-    const S = [
-      ['Capture', 'Highlight any line on the web and write your take in one sentence.', 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4'],
-      ['Check in', 'Hold your phone for the 3-second gesture. Your body answers, not your thumbs.', 'M7 2.5h10v19H7zM11 18.5h2'],
-      ['See the vibe', 'At 3 people a lean appears. At 10, the full split. Never who.', 'M3 12h3l3-7 4 14 3-7h5']
-    ];
-    html = head('How it works') + S.map((s) => '<div class="step"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + s[2] + '"/></svg></span><div><b>' + s[0] + '</b><span>' + s[1] + '</span></div></div>').join('') +
-      '<p class="fine left">Lines chosen for you always say why. We pick by relevance and by how close a line is to revealing, never to push a side.</p>';
-  }
-  sheet.innerHTML = html;
+  if (scrim.hidden) lastFocus = document.activeElement;
+  st.sheet = kind;
+  sheet.innerHTML = sheetHtml(kind);
   scrim.hidden = false;
-  const f = sheet.querySelector('.btn-main,.x');
+  drawQr();
+  const f = sheet.querySelector(kind === 'signin' ? 'input' : '.btn-main,.x');
   if (f) f.focus();
-  const bl = document.getElementById('b-line');
-  if (bl) {
-    bl.addEventListener('input', () => {
-      const v = bl.value.trim();
-      const ok = /^(I|My)\b/.test(v);
-      document.getElementById('b-count').textContent = bl.value.length + ' / 140';
-      document.getElementById('b-hint').classList.toggle('bad', !ok && v.length > 0);
-      document.getElementById('b-msg').textContent = ok || !v ? 'Start with I or My. Everyone checks their body against this.' : 'Lines start with I or My, so each person checks it against themselves.';
-    });
-  }
+}
+
+// Re-draws the open check sheet after a send result and keeps focus inside it.
+function refreshCheckSheet() {
+  sheet.innerHTML = sheetHtml('check');
+  drawQr();
+  const f = sheet.querySelector('.btn-main') || document.getElementById('sent');
+  if (f) f.focus();
 }
 
 function closeSheet() {
   scrim.hidden = true;
+  st.sheet = null;
   if (lastFocus && document.body.contains(lastFocus)) lastFocus.focus();
+}
+
+function stopPoll() { clearTimeout(pollTimer); pollTimer = null; }
+
+// The receipt is the ask's request id: only the signed-in person who sent it can
+// read their own progress with it. Without one the page can show the room only.
+async function checkProgress({ silent = false } = {}) {
+  const slug = st.pick && st.pick.slug;
+  if (!slug) return false;
+  const r = await loadProgress(call, API, slug, { receipt: st.receipt, token: token() });
+  if (!r.progress) { if (!silent) { st.sendError = 'error'; refreshCheckSheet(); } return false; }
+  if (st.receipt && r.progress.your_checkin_counted !== true) {
+    if (!silent) { st.sendError = null; document.getElementById('sent').textContent = 'Not yet. Finish the check-in on your phone first.'; document.getElementById('sent').focus(); }
+    return false;
+  }
+  stopPoll();
+  st.progress = r.progress;
+  st.mode = st.receipt ? 'reveal' : 'room';
+  st.phase = 'done';
+  if (st.sheet === 'check') closeSheet();
+  render();
+  focusCard();
+  return true;
+}
+
+function startPoll() {
+  stopPoll();
+  let n = 0;
+  const tick = async () => {
+    if (st.phase === 'done' || !st.receipt || ++n > POLL_MAX) return;
+    if (!(await checkProgress({ silent: true }))) pollTimer = setTimeout(tick, POLL_MS);
+  };
+  pollTimer = setTimeout(tick, POLL_MS);
+}
+
+async function sendShared() {
+  const r = await sendToPhone(call, API, st.pick.slug, token());
+  st.sendError = null;
+  if (r.status === 'sent') { st.sent = true; st.receipt = r.requestId; startPoll(); }
+  else if (r.status === 'link_required') st.linkRequired = true;
+  else st.sendError = r.status;
+  refreshCheckSheet();
+}
+
+async function sendPrivate() {
+  const line = currentLine();
+  const r = line ? await askPrivate(call, API, line.id, token()) : { status: 'error' };
+  st.sendError = r.status === 'sent' ? null : r.status;
+  st.sent = r.status === 'sent';
+  refreshCheckSheet();
+}
+
+async function loadConsent() {
+  const r = await getConsent(call, session);
+  st.consent = r.consent;
+  st.perror = r.error && r.error !== 'signin' ? 'consent_unavailable' : null;
+  if (st.lane === 'private') render();
+}
+
+async function generate() {
+  st.perror = null;
+  if (st.consent !== true) { st.perror = 'consent_required'; render(); return; }
+  const words = st.pctx === 'words' ? (document.getElementById('mind') || {}).value || '' : '';
+  if (st.pctx === 'words' && !words.trim()) { st.perror = 'empty_words'; render(); return; }
+  const r = await generateDrafts(call, API, { source: st.pctx, words: words.trim() }, token());
+  if (r.error === 'signin') { await session.signOut(); st.perror = null; return; }
+  if (r.error === 'consent_required') st.consent = false;
+  if (r.error) { st.perror = r.error; render(); return; }
+  st.drafts = r.drafts; st.didx = 0; st.generated = true; st.phase = 'card';
+  render();
+  focusCard();
+}
+
+function resetPerson() {
+  stopPoll();
+  st.consent = null; st.drafts = []; st.generated = false; st.linkRequired = false; st.receipt = null; st.sent = false; st.sendError = null; st.perror = null;
+  if (st.sheet && st.sheet !== 'how') closeSheet();
+  render();
+}
+
+function enterPrivate() {
+  st.lane = 'private'; st.phase = 'card';
+  render();
+  if (token() && st.consent === null) loadConsent();
 }
 
 document.addEventListener('click', (e) => {
   const l = e.target.closest('[data-lane]');
-  if (l) { st.lane = l.dataset.lane; st.phase = 'card'; render(); return; }
+  if (l) { if (l.dataset.lane === 'private') enterPrivate(); else { st.lane = 'shared'; st.phase = 'card'; render(); } return; }
   const o = e.target.closest('[data-open]');
   if (o) { openSheet(o.dataset.open); return; }
   const c = e.target.closest('[data-ctx]');
-  if (c) { st.pctx = c.dataset.ctx; render(); return; }
+  if (c) { st.pctx = c.dataset.ctx; st.perror = null; render(); return; }
   const a = e.target.closest('[data-act]');
   if (!a) { if (e.target === scrim) closeSheet(); return; }
   const act = a.dataset.act;
-  if (act === 'check') openSheet('check');
+  if (act === 'check') { st.sent = false; st.sendError = null; openSheet('check'); }
   else if (act === 'close') closeSheet();
-  else if (act === 'send') document.getElementById('sent').textContent = 'Sent. Open SomaCheck on your phone.';
-  else if (act === 'next') { st.idx++; st.phase = 'card'; render(); }
-  else if (act === 'skip') { st.idx++; render(); }
-  else if (act === 'generate') { st.pgenerated = true; st.phase = 'card'; render(); }
-  else if (act === 'rewrite') { st.pidx++; render(); }
-  else if (act === 'edit') { st.pgenerated = false; st.pctx = 'words'; render(); }
+  else if (act === 'send') (st.lane === 'private' ? sendPrivate() : sendShared());
+  else if (act === 'checked') checkProgress();
+  else if (act === 'next' || act === 'skip') { stopPoll(); st.excludes = extendExcludes(st.excludes, st.pick.slug); showPick(); }
+  else if (act === 'retry') { if (!st.pickError) st.excludes = []; showPick(); }
+  else if (act === 'generate') generate();
+  else if (act === 'rewrite') { st.didx++; render(); }
+  else if (act === 'edit') { st.generated = false; st.pctx = 'words'; render(); }
   else if (act === 'lane-shared') { st.lane = 'shared'; st.phase = 'card'; render(); }
-  else if (act === 'bring-send') a.textContent = 'Sent. Finish on your phone.';
+  else if (act === 'signout') session.signOut();
+});
+
+document.addEventListener('change', async (e) => {
+  if (!e.target.matches('[data-consent]')) return;
+  const want = e.target.checked;
+  const r = await setConsent(call, session, want);
+  if (r.consent === null) { st.perror = r.error === 'signin' ? null : 'consent_unavailable'; if (r.error === 'signin') await session.signOut(); }
+  else { st.consent = r.consent; st.perror = null; }
+  render();
+  const again = document.getElementById('consent');
+  if (again) again.focus();
+});
+
+document.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'signin-form') return;
+  e.preventDefault();
+  const status = document.getElementById('si-status');
+  const r = await session.signIn(new FormData(e.target).get('email'));
+  status.textContent = SIGNIN_STATUS[r.ok ? 'sent' : r.error] || SIGNIN_STATUS.unavailable;
 });
 
 // Keep Tab inside the open sheet; Escape closes it.
@@ -115,21 +248,13 @@ scrim.addEventListener('keydown', (e) => {
   else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 });
 
+session.onChange(() => { if (!session.getAccessToken()) resetPerson(); else render(); });
+
 async function load() {
   if (window.SOMACHECK_INSTALL_URL) document.getElementById('get-app').href = window.SOMACHECK_INSTALL_URL;
-  const [picks, lines] = await Promise.all([
-    Promise.all(PICKS.map((r) => getJson('pick-' + r + '.json'))),
-    getJson('private-lines.json')
-  ]);
-  st.picks = picks;
-  st.lines = lines;
-  // Review hook until real progress polling lands: ?state=revealed shows the
-  // post check-in screen from the progress fixture.
-  if (new URLSearchParams(location.search).get('state') === 'revealed') {
-    st.progress = await getJson('progress-revealed.json');
-    st.phase = 'done';
-  }
-  render();
+  await session.restore();
+  await showPick();
+  if (new URLSearchParams(location.search).get('signin') === '1' && !token() && session.configured()) openSheet('signin');
 }
 
 load();

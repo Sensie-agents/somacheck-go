@@ -65,8 +65,8 @@ async function open(width, height = 900, opts = {}) {
     if (u.includes('/following-feed')) return respond(route, opts.followingStatus ? {} : { items: [REAL.following] }, opts.followingStatus || 200);
     return route.fulfill({ status: 404 });
   });
-  // No web session exists yet; a test can stand in a token by replacing session.js.
-  if (opts.token) await page.route('**/explore/session.js', (r) => r.fulfill({ contentType: 'text/javascript', body: 'export function getAccessToken(){return ' + JSON.stringify(opts.token) + ';}' }));
+  // A signed-in test seeds the real web session (world-vibe/session.js) in storage.
+  if (opts.token) await page.addInitScript((token) => localStorage.setItem('wv.session', JSON.stringify({ access_token: token, refresh_token: 'r', expires_at: Math.floor(Date.now() / 1000) + 86400, user_id: 'u-1', email: 'me@x.test' })), opts.token);
   await page.addInitScript((api) => { window.SOMACHECK_API_BASE = api; }, API);
   const requests = [];
   page.on('request', (r) => requests.push(r.url()));
@@ -145,7 +145,7 @@ await check('Following without a session makes no request and shows the sign-in 
   assert.ok(!requests.some((u) => u.includes('following-feed')));
   assert.equal(await page.locator('.post').count(), 0);
   assert.match(await page.locator('#feed').textContent(), /Sign in to see who you follow/);
-  assert.equal(await page.locator('#feed button.signin').isDisabled(), true);
+  assert.equal(await page.locator('#feed a.signin').getAttribute('href'), '/world-vibe/?signin=1');
   await page.close();
 });
 

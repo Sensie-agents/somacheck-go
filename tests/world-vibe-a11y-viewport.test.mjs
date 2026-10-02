@@ -14,7 +14,7 @@ const artifactDir = path.join(root, '.artifacts', 'a11y-screens');
 await mkdir(artifactDir, { recursive: true });
 
 const [portalHtml, sharePageHtml] = await Promise.all([
-  readFile(path.join(root, 'world-vibe', 'index.html'), 'utf8'),
+  readFile(path.join(root, 'world-vibe', 'legacy', 'index.html'), 'utf8'),
   readFile(path.join(root, 'world-vibe', 'share', 'gut-vs-dashboard', 'index.html'), 'utf8')
 ]);
 

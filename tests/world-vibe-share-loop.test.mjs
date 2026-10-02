@@ -10,7 +10,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || '/opt/homebrew/lib/n
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = process.env.WVSMART_ROOT || path.resolve(here, '..');
-const sourcePath = path.join(root, 'world-vibe', 'index.html');
+const sourcePath = path.join(root, 'world-vibe', 'legacy', 'index.html');
 const topicsPath = path.join(root, 'world-vibe', 'topics.json');
 
 const [source, topicsJson] = await Promise.all([

@@ -125,3 +125,18 @@ button{font:inherit;color:inherit;cursor:pointer}
 .btn-main[disabled]{opacity:.7}
 .scrim[hidden]{display:none}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* WP12: account bar, consent switch, sheet extras */
+.acct{display:flex;align-items:center;gap:4px}
+.who{font-size:13px;color:var(--ink2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.linkbtn{align-self:center;border:0;background:none;padding:6px 10px;font-size:14px;font-weight:600;color:var(--em-deep);text-decoration:underline}
+.btn-sec{height:48px;border:1.5px solid var(--line2);border-radius:14px;background:var(--surface);font-size:15px;font-weight:700;color:var(--ink)}
+.btn-sec:hover{background:var(--wash)}
+.btn-main:disabled{background:#B8BDB9;color:#3A3F44;cursor:not-allowed}
+.consent{display:flex;flex-direction:column;gap:6px}
+.switch{display:flex;gap:12px;align-items:flex-start;font-size:14px;font-weight:600;line-height:1.4;cursor:pointer}
+.switch input{width:22px;height:22px;margin-top:1px;flex-shrink:0;accent-color:var(--em-deep)}
+.err{margin:0;padding:12px 14px;border-radius:12px;background:#FBEAE6;color:#8A2A12;font-size:14px;font-weight:600}
+.own{margin:0;font-size:15px;color:var(--ink)}
+/* The early reduced-motion rule loses to the later .sheet animation; restate it last. */
+@media (prefers-reduced-motion:reduce){.sheet{animation:none}}

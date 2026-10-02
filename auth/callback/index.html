@@ -86,6 +86,7 @@
     </p>
   </div>
 
+  <script src="/world-vibe/config.js"></script>
   <script>
     (function () {
       // Supabase Swift uses PKCE and returns ?code=...; older implicit links
@@ -114,10 +115,27 @@
         return;
       }
 
-      // Empty link — no PKCE code, tokens, or error. Usually means the user opened
+      // A link requested from the World Vibe website (web=1) finishes on the
+      // web: the PKCE code is exchanged here, with the verifier this browser
+      // stored, and the person lands back on the page they came from. It never
+      // deep-links into the app. App-initiated links carry no web=1 and keep the
+      // behaviour below unchanged.
+      if (queryParams.get('web') === '1') {
+        import('/world-vibe/session.js').then(function (m) {
+          return m.session.completeSignIn(search);
+        }).then(function (r) {
+          if (r && r.ok) { window.location.replace(r.next); return; }
+          showError('This sign-in link has expired or was opened in a different browser than the one you asked from. Request a new link on World Vibe.');
+        }).catch(function () {
+          showError('We could not finish signing you in. Request a new link on World Vibe.');
+        });
+        return;
+      }
+
+      // Empty link: no PKCE code, tokens, or error. Usually means the user opened
       // /auth/callback directly without clicking an email link, or the email
       // client stripped the fragment. Don't silently try to deeplink with
-      // nothing — show a clear message instead.
+      // nothing. Show a clear message instead.
       var hashParams = new URLSearchParams(hash.replace(/^#/, ''));
       var hasPKCECode = !!queryParams.get('code');
       var hasImplicitTokens = !!hashParams.get('access_token') && !!hashParams.get('refresh_token');

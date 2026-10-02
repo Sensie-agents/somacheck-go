@@ -69,7 +69,7 @@ export function renderFeed(state, data) {
   }
   if (data.followingError === 'signin' || data.followingError === 'auth') {
     return '<div class="end" data-signin-state><p>Sign in to see who you follow.</p>' +
-      '<button class="signin" type="button" disabled aria-disabled="true">Sign in (coming soon)</button></div>';
+      '<a class="signin" href="/world-vibe/?signin=1">Sign in</a></div>';
   }
   if (data.followingError) return errorBox("Couldn't load who you follow right now.", 'following');
   return '<p class="end">Follow a curator to see their lines here.</p>';
@@ -160,7 +160,7 @@ export function renderHero(featured) {
   const label = featured.public_signals === true ? '<span class="public-label">' + PUBLIC_SIGNAL_LABEL + '</span>' : '';
   return '<article class="totw" aria-labelledby="totw-h"><span class="eyebrow"><i></i>TOPIC OF THE WEEK</span>' +
     '<h2 id="totw-h">' + esc(featured.statement) + '</h2>' + label + progress +
-    '<button class="btn-main" type="button" data-check="' + esc(featured.statement) + '">' + PHONE + 'Check in</button>' +
+    '<button class="btn-main" type="button" data-check="' + esc(featured.statement) + '" data-slug="' + esc(featured.slug) + '">' + PHONE + 'Check in</button>' +
     '<p class="micro">Three seconds on your phone. Your reading stays private.</p></article>';
 }
 

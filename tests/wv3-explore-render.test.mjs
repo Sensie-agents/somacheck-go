@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { selectItems, renderFeed, renderEnd, focusSelector, nextTab, renderPost, renderCuratorList, renderStrip, renderFilterText, renderHero, PUBLIC_SIGNAL_LABEL } from '../world-vibe/explore/explore-render.js';
 import { loadFeed, loadFeedInto, retryCursor, loadCurators, loadFeatured, loadFollowing } from '../world-vibe/explore/explore-data.js';
-import { getAccessToken } from '../world-vibe/explore/session.js';
+import { getAccessToken } from '../world-vibe/session.js';
 
 const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'world-vibe', 'explore');
 const read = (n) => readFileSync(path.join(dir, n), 'utf8');
@@ -271,7 +271,7 @@ test('featured null is a normal state', async () => {
   assert.equal(await loadFeatured(fakeFetch({ '/featured': { body: { featured: null } } }), 'x'), null);
 });
 
-test('session: getAccessToken is null until WP12 wires Supabase Auth', () => {
+test('session: getAccessToken is null when there is no browser session', () => {
   assert.equal(getAccessToken(), null);
 });
 
@@ -352,11 +352,12 @@ test('Following empty state only when the load succeeded with no rows', () => {
   assert.match(text(followingOf({})), /Follow a curator/);
 });
 
-test('Following signed out (no token) or 401 renders the sign-in state with a disabled placeholder, never rows', () => {
+test('Following signed out (no token) or 401 renders the sign-in state with a live Sign in link, never rows', () => {
   for (const followingError of ['signin', 'auth']) {
     const html = followingOf({ followingError, following: [REAL.following] });
     assert.match(text(html), /Sign in to see who you follow/);
-    assert.match(html, /<button[^>]*class="signin"[^>]*disabled/);
+    assert.match(html, /<a class="signin" href="\/world-vibe\/\?signin=1">Sign in<\/a>/);
+    assert.doesNotMatch(html, /disabled|coming soon/i);
     assert.deepEqual(slugs(html), []);
     assert.doesNotMatch(text(html), /Follow a curator/);
   }
@@ -505,7 +506,7 @@ test('How it works exists in both layouts (fold under 1000px, side panel above)'
 });
 
 test('no "Prototype only" and no em dashes under world-vibe/explore', () => {
-  for (const f of ['index.html', 'explore.js', 'explore-render.js', 'explore-data.js', 'explore.css', 'session.js']) {
+  for (const f of ['index.html', 'explore.js', 'explore-render.js', 'explore-data.js', 'explore.css']) {
     const s = read(f);
     assert.doesNotMatch(s, /Prototype only/i, f);
     assert.ok(!s.includes('\u2014'), 'em dash in ' + f);
