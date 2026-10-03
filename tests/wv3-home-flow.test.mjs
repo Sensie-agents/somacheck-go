@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createFlow } from '../world-vibe/home/home-flow.js';
-import { pickAnon, pickEnvelope, progressEnvelope, consentBody, phoneBody, sendOk, sendLinkRequired, draftsCreate, draftsConsentRequired } from './helpers/captured.mjs';
+import { pickAnon, pickEnvelope, progressEnvelope, consentBody, phoneBody, sendOk, sendLinkRequired, draftsCreate, draftsConsentRequired, privateAsk } from './helpers/captured.mjs';
 
 const API = 'https://api.test';
 const RECEIPT = sendOk.body.request_id;
@@ -33,7 +33,7 @@ function harness({ routes = {}, signedIn = true } = {}) {
   };
   const timers = [];
   const flow = createFlow({ api: API, fetchFn, getToken: () => token, ui, setTimer: (fn) => { timers.push(fn); return timers.length; }, clearTimer: () => {} });
-  const release = async (key) => { const h = held.filter((x) => x.key === key); h.forEach((x) => x.release()); await new Promise((r) => setTimeout(r, 0)); };
+  const release = async (key, only) => { const h = held.filter((x) => x.key === key).filter((_, i) => only === undefined || i === only); h.forEach((x) => x.release()); await new Promise((r) => setTimeout(r, 0)); };
   return { flow, st: flow.st, calls, events, timers, release, signOut: () => { token = null; flow.signedOut(); }, count: (key) => calls.filter((c) => c.key === key).length };
 }
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -179,7 +179,7 @@ test('moving to another item mid-poll drops the old item\'s progress', async () 
 });
 
 test('a private ask that resolves after a lane switch does not touch the shared sheet state', async () => {
-  const h = harness({ routes: { ...base, ['POST /v1/me/vibecheck/drafts/' + DRAFT + '/ask']: { hold: res(sendOk.status, sendOk.body) } } });
+  const h = harness({ routes: { ...base, ['POST /v1/me/vibecheck/drafts/' + DRAFT + '/ask']: { hold: res(privateAsk.status, privateAsk.body) } } });
   await h.flow.showPick();
   h.flow.selectLane('private');
   h.st.drafts = [draftsCreate.body.drafts[0]]; h.st.generated = true;
@@ -410,7 +410,7 @@ test('drafts: a generate that resolves after the lane moved on does not store th
 
 test('private ask: an ask that resolves after sign-out does not mark the line sent', async () => {
   const ASK = 'POST /v1/me/vibecheck/drafts/' + DRAFT + '/ask';
-  const h = harness({ routes: { ...base, [ASK]: { hold: res(sendOk.status, sendOk.body) } } });
+  const h = harness({ routes: { ...base, [ASK]: { hold: res(privateAsk.status, privateAsk.body) } } });
   await h.flow.showPick();
   h.flow.selectLane('private');
   h.st.drafts = [draftsCreate.body.drafts[0]]; h.st.generated = true;
@@ -431,4 +431,15 @@ test('poll: a tick that fires after a lane switch ends the poll instead of resch
   await h.timers[0]();
   assert.equal(h.count(PROGRESS1), 0);
   assert.equal(h.timers.length, 1, 'a poll from the shared lane does not keep ticking in the private lane');
+});
+
+test('consent: two failed PUTs, then a GET started after the last settle, lands', async () => {
+  const h = harness({ routes: { ...base, [CONSENT_PUT]: { hold: res(500, {}) }, [CONSENT_GET]: res(200, consentBody(false)) } });
+  const old = h.flow.toggleConsent(true), latest = h.flow.toggleConsent(false); await flush();
+  await h.release(CONSENT_PUT, 1); await latest;                   // the latest PUT fails first
+  const read = h.flow.loadConsent();                                // starts after the last settle
+  await h.release(CONSENT_PUT, 0); await old;                       // the superseded PUT settles during the read
+  await read;
+  assert.equal(h.st.consent, false);
+  assert.equal(h.st.perror, null, 'a superseded PUT must not invalidate the later read');
 });

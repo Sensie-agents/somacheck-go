@@ -29,6 +29,8 @@ const SHA256 = {
   'wv3_drafts_create.json': 'afc7d1311b3165a0a4e2731a7ba3af4b6628b0b956c6416e77ee51cd968201e2',
   'wv3_drafts_consent_required.json': 'b627001727c7f35e63988cc403093fea370314d1aee57b587d660aeeed7a9396',
   'wv3_create_v3.json': 'fc77093cf6840e73a8441216d93aa940b0d1bab2c4527230d6e44bc6ae94307c',
+  'wv3_phone.json': '2f317fe9599ccb49744eead8f57b74ad49ce372c0d130b823d1988691ba0360d',
+  'wv3_phone_unlinked.json': 'dbf204b1173dd3720018d767944ce3b89ff1fd348b0e622230ae09f7933ed85b',
   'wv3_consent.json': '02edb74014a211553ef98267973762f8cf3ddd9736a3a0242aca42b24796094e'
 };
 
@@ -41,21 +43,18 @@ test('every captured fixture is byte-identical to its recorded capture', () => {
 // Where each capture lives in its backend worktree. When the sibling worktree is
 // present the bytes are compared directly, not only against the pinned hash.
 const BACKEND = (wt) => path.resolve(fixturesDir, '..', '..', '..', '..', wt, 'supabase', 'functions', 'statement-api', 'fixtures');
-const SOURCE = (name) => (name === 'wv3_consent.json' ? 'wv3-consent-sol2' : 'wv3-integration');
+const SOURCE = (name) => (name === 'wv3_consent.json' ? 'wv3-consent-sol2' : /phone/.test(name) ? 'wv3-backend-sol2' : 'wv3-integration');
 
 test('each home and consent capture is byte-identical to its backend worktree when present', () => {
-  for (const name of Object.keys(SHA256).filter((n) => /pick|progress|send|drafts|create_v3|consent/.test(n))) {
+  for (const name of Object.keys(SHA256).filter((n) => /pick|progress|send|drafts|create_v3|consent|phone/.test(n))) {
     let theirs;
     try { theirs = readFileSync(path.join(BACKEND(SOURCE(name)), name)); } catch { continue; }
     assert.ok(readFileSync(path.join(fixturesDir, name)).equals(theirs), name);
   }
 });
 
-// wv3_phone.json is still pending from the backend lane; tests/helpers/captured.mjs
-// keeps the contract-shape fallback for it only. Any other extra file is hand-written.
-const PENDING_CAPTURES = ['wv3_phone.json'];
-
+// Any file here that is not a recorded capture is hand-written.
 test('no fixture exists that is not a recorded capture', () => {
   const extra = readdirSync(fixturesDir).filter((n) => !(n in SHA256));
-  assert.deepEqual(extra.filter((n) => !PENDING_CAPTURES.includes(n)), []);
+  assert.deepEqual(extra, []);
 });

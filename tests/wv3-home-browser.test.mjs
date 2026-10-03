@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pickAnon, progressLocked, progressLean, progressExact, pickEnvelope, progressEnvelope, consentBody, phoneBody, itemRow, sendOk, sendLinkRequired, draftsCreate, draftsConsentRequired } from './helpers/captured.mjs';
+import { pickAnon, progressLocked, progressLean, progressExact, pickEnvelope, progressEnvelope, consentBody, phoneBody, itemRow, sendOk, sendLinkRequired, draftsCreate, draftsConsentRequired, privateAsk, emptyPick, feedRow, curators, featuredRow } from './helpers/captured.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || '/opt/homebrew/lib/node_modules/playwright');
@@ -62,7 +62,7 @@ async function open(width, opts = {}) {
     const headers = await req.allHeaders();
     log.api.push({ url: u.pathname + u.search, auth: headers.authorization, method: req.method() });
     if (req.method() === 'OPTIONS') return json(route, {});
-    if (u.pathname === '/v1/public/world-vibe/pick') { log.pickUrls.push(u.search); const picks = opts.picks || PICKS; return json(route, picks[pickCalls++] || { item: null, reason: null }); }
+    if (u.pathname === '/v1/public/world-vibe/pick') { log.pickUrls.push(u.search); const picks = opts.picks || PICKS; return json(route, picks[pickCalls++] || emptyPick); }
     if (u.pathname.endsWith('/progress')) {
       log.progress.push({ url: u.pathname + u.search, auth: headers.authorization });
       const list = opts.progress || [progressEnvelope({ slug: 'pick-one' })];
@@ -78,7 +78,7 @@ async function open(width, opts = {}) {
       if (opts.draftsStatus) return json(route, draftsConsentRequired.body, opts.draftsStatus);
       return json(route, draftsCreate.body);
     }
-    if (/^\/v1\/me\/vibecheck\/drafts\/[^/]+\/ask$/.test(u.pathname)) { log.draftAsks.push({ path: u.pathname, auth: headers.authorization }); return json(route, sendOk.body, sendOk.status); }
+    if (/^\/v1\/me\/vibecheck\/drafts\/[^/]+\/ask$/.test(u.pathname)) { log.draftAsks.push({ path: u.pathname, auth: headers.authorization }); return json(route, privateAsk.body, privateAsk.status); }
     if (u.pathname === '/v1/me/world-vibe/consent') {
       if (!headers.authorization) return json(route, { error: 'unauthorized' }, 401);
       if (req.method() === 'PUT') { const b = JSON.parse(req.postData()); log.consentWrites.push({ body: b, headers }); consent = b.world_vibe_private; return json(route, consentBody(consent)); }
@@ -96,9 +96,9 @@ async function open(width, opts = {}) {
       if (typeof it === 'number') return json(route, { error: 'x' }, it);
       return json(route, it || itemRow({ slug: decodeURIComponent(u.pathname.split('/').pop()) }));
     }
-    if (u.pathname === '/v1/public/world-vibe/feed') return json(route, { items: [pickEnvelope('x', { slug: 'f-1' }).item], next_cursor: null });
-    if (u.pathname === '/v1/public/world-vibe/curators') return json(route, { curators: [] });
-    if (u.pathname === '/v1/public/world-vibe/featured') return json(route, { featured: null });
+    if (u.pathname === '/v1/public/world-vibe/feed') return json(route, { items: [feedRow], next_cursor: null });
+    if (u.pathname === '/v1/public/world-vibe/curators') return json(route, { curators });
+    if (u.pathname === '/v1/public/world-vibe/featured') return json(route, { featured: featuredRow });
     return route.fulfill({ status: 404 });
   });
   await page.route(SB + '/**', async (route) => {
@@ -191,7 +191,7 @@ await check('closest_to_unlock shows the head count and the reveal ladder, not a
 });
 
 await check('an empty pick is an honest state with Start over', async () => {
-  const { page, log } = await open(420, { picks: [{ item: null, reason: null }, PICKS[0]] });
+  const { page, log } = await open(420, { picks: [emptyPick, PICKS[0]] });
   assert.match(await page.locator('#slot').textContent(), /seen everything for now/);
   await page.locator('[data-act="retry"]').click();
   await page.waitForFunction(() => document.querySelector('.line'));
@@ -621,7 +621,7 @@ await axeCheck('private lane consent on, words', async (p) => { await consentOn(
 await axeCheck('private line written', async (p) => { await consentOn(p); await p.locator('[data-act="generate"]').click(); await p.waitForSelector('#slot .line:not(.small)'); }, { open: { signedIn: true, consent: true } });
 await axeCheck('private check sheet', async (p) => { await consentOn(p); await p.locator('[data-act="generate"]').click(); await p.waitForSelector('#slot .line:not(.small)'); await p.locator('[data-act="check"]').click(); }, { open: { signedIn: true, consent: true } });
 await axeCheck('reveal', async (p) => { await p.locator('[data-act="check"]').click(); await p.locator('[data-act="checked"]').click(); await p.waitForSelector('.reveal-head'); }, { open: { progress: [progressEnvelope({ slug: 'pick-one', revealed_by_you: true, your_reading: 'aligned' })], signedIn: true } });
-await axeCheck('empty state', async () => {}, { open: { picks: [{ item: null, reason: null }] , noWait: false } });
+await axeCheck('empty state', async () => {}, { open: { picks: [emptyPick], noWait: false } });
 await axeCheck('QR landing item', async (p) => { await p.waitForSelector('[data-state="item"]:not([hidden])'); }, { open: { pageUrl: '/world-vibe/share/?item=wv3-r2-public', noWait: true } });
 await axeCheck('QR landing not found', async (p) => { await p.waitForSelector('[data-state="missing"]:not([hidden])'); }, { open: { pageUrl: '/world-vibe/share/?item=nope', noWait: true, item: 404 } });
 await axeCheck('Chrome install page', async () => {}, { open: { pageUrl: '/world-vibe/chrome/', noWait: true } });

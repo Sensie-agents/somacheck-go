@@ -143,9 +143,9 @@ export function createFlow({ api, fetchFn, getToken, tz = 'UTC', arrivedFrom = n
     const seq = ++writeSeq;
     const r = await setConsent(fetchFn, api, getToken(), want);
     if (!still()) return;
-    readSeq++;   // a read that started while this write was pending is older than its outcome
     const expired = r.consent === null && r.error === 'signin';
     if (seq !== writeSeq && !expired) return;
+    readSeq++;   // only the latest write's settle makes a read that started during it stale
     if (r.consent === null) {
       st.perror = expired ? null : 'consent_unavailable';
       if (expired) await ui.signOut();
