@@ -283,6 +283,37 @@ test('consent: a 401 on the PUT signs out even though a newer GET resolved first
   assert.equal(h.st.consent, null, 'sign-out cleared the personal state');
 });
 
+// The other response order: the GET started while the PUT was pending, but the PUT
+// settles first. The settled outcome survives until a read that starts after it.
+test('consent: a GET started during a pending PUT, answering after the PUT succeeded, does not undo it', async () => {
+  const h = harness({ routes: { ...base, [CONSENT_GET]: { hold: res(200, consentBody(true)) }, [CONSENT_PUT]: { hold: res(200, consentBody(false)) } } });
+  h.st.consent = true;
+  const writing = h.flow.toggleConsent(false); await flush();
+  const reading = h.flow.loadConsent(); await flush();   // GET starts while the revoke is pending
+  await h.release(CONSENT_PUT); await writing;
+  assert.equal(h.st.consent, false);
+  await h.release(CONSENT_GET); await reading;        // the stale read lands last
+  assert.equal(h.st.consent, false, 'the revocation stays');
+});
+
+test('consent: a GET started during a pending PUT, answering after the PUT failed (500), keeps the error', async () => {
+  const h = harness({ routes: { ...base, [CONSENT_GET]: { hold: res(200, consentBody(true)) }, [CONSENT_PUT]: { hold: res(500, {}) } } });
+  const writing = h.flow.toggleConsent(false); await flush();
+  const reading = h.flow.loadConsent(); await flush();
+  await h.release(CONSENT_PUT); await writing;
+  assert.equal(h.st.perror, 'consent_unavailable');
+  await h.release(CONSENT_GET); await reading;
+  assert.equal(h.st.perror, 'consent_unavailable', 'the error is not cleared by the stale read');
+});
+
+test('consent: a read that starts after the PUT settled is applied', async () => {
+  const h = harness({ routes: { ...base, [CONSENT_PUT]: res(200, consentBody(false)), [CONSENT_GET]: res(200, consentBody(true)) } });
+  await h.flow.toggleConsent(false);
+  assert.equal(h.st.consent, false);
+  await h.flow.loadConsent();
+  assert.equal(h.st.consent, true);
+});
+
 test('consent write: a 401 on an older write still signs out after a newer write succeeded', async () => {
   const gates = [];
   const h = harness({ routes: { ...base, [CONSENT_PUT]: () => new Promise((resolve) => gates.push(resolve)) } });
