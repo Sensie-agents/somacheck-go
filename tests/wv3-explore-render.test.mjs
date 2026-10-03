@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { selectItems, renderFeed, renderEnd, focusSelector, nextTab, trapTarget, renderPost, renderCuratorList, renderStrip, renderFilterText, renderHero, PUBLIC_SIGNAL_LABEL } from '../world-vibe/explore/explore-render.js';
 import { loadFeed, loadFeedInto, retryCursor, loadCurators, loadFeatured, loadFollowing } from '../world-vibe/explore/explore-data.js';
+import { refusal } from './helpers/captured.mjs';
 import { getAccessToken } from '../world-vibe/session.js';
 
 const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'world-vibe', 'explore');
@@ -91,7 +92,8 @@ function pagedFetch(pages, firstCursor = null) {
     urls.push(url);
     const q = new URL(url).searchParams.get('cursor');
     const page = pages[q === null ? '' : q];
-    if (!page) return { ok: false, status: 400, json: async () => ({}) };
+    // A cursor the server did not issue for this order is the captured 422.
+    if (!page) { const c = refusal('feed_422_cursor'); return { ok: false, status: c.status, json: async () => c.body }; }
     return { ok: true, status: 200, json: async () => page };
   };
   fn.urls = urls;
@@ -109,6 +111,17 @@ test('feed forwards the cursor query parameter and stops when it is null', async
   assert.deepEqual(r.items.map((i) => i.slug), ['p1', 'p2']);
   assert.equal(r.cursor, null);
   assert.deepEqual(f.urls, ['https://api.test/v1/public/world-vibe/feed', 'https://api.test/v1/public/world-vibe/feed?cursor=c1']);
+});
+
+test('a cursor the server rejects surfaces the captured 422 invalid_cursor and keeps the rows already read', async () => {
+  const c = refusal('feed_422_cursor');
+  assert.equal(c.status, 422);
+  assert.equal(c.body.error, 'invalid_cursor');
+  const f = pagedFetch({ '': { items: [row({ slug: 'p1' })], next_cursor: 'stale' } });
+  await assert.rejects(() => loadFeed(f, 'https://api.test'), (e) => e.status === 422);
+  const state = { feed: [], feedCursor: null, feedError: false };
+  await loadFeedInto(state, f, 'https://api.test', null);
+  assert.equal(state.feedError, true);
 });
 
 test('feed keeps paginating past five pages until the cursor is null', async () => {

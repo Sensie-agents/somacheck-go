@@ -47,6 +47,8 @@ const SHA256 = {
   'wv3_refusal_following_feed_401.json': 'c7fa62a20471d0d626a26e69c9d2769e76ec14092342791a172feb9b35dcdc57',
   'wv3_refusal_follows_401.json': '5b3b1a7b5491717f3bfd211f46c616c72bcde64d81859680e9b40d347870fe85',
   'wv3_refusal_item_404.json': '278500f3542967062b4a309418d806031496a5bdac7f0b09bbf6ec08815b42f4',
+  'wv3_refusal_progress_404.json': 'eec074df0a004330bc6ab270db03e312d34c582ff716bc7a9e0b5edb42cd48da',
+  'wv3_refusal_feed_422_cursor.json': '5879c4118d7a4b8756121eea3a1ad2f143e871bc2625752dee632b4f71f4101f',
   'wv3_refusal_phone_401.json': '05e22ba7910ccefa4dfa31684c0283ffcbb81b041fd9fdeeaa13841a3019baee',
   'wv3_refusal_private_ask_401.json': '05e22ba7910ccefa4dfa31684c0283ffcbb81b041fd9fdeeaa13841a3019baee',
   'wv3_refusal_private_ask_404.json': '7f977ef0cc2248d37fd9f590e8eb13aa54706fc541012da69375c8db0f66063c',

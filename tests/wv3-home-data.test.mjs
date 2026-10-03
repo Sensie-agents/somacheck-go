@@ -108,7 +108,8 @@ test('progress: returns the body with revealed_by_you and your_reading untouched
   const body = progressEnvelope({ revealed_by_you: true, your_reading: 'aligned' });
   const r = await loadProgress(recorder(() => res(200, body)), API, 'x', { token: 't' });
   assert.deepEqual(r.progress, body);
-  assert.equal((await loadProgress(recorder(() => res(404, {})), API, 'x', {})).error, 'not_found');
+  const gone = refusal('progress_404');
+  assert.equal((await loadProgress(recorder(() => res(gone.status, gone.body)), API, 'x', {})).error, 'not_found');
   assert.equal((await loadProgress(recorder(() => res(500, {})), API, 'x', {})).error, 'unavailable');
 });
 

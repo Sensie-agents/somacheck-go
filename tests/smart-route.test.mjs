@@ -36,6 +36,7 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url, 'http://127.0.0.1');
 
   if (url.pathname === `/api/s/${token}` && url.searchParams.get('format') === 'json') {
+    // PENDING CAPTURE: the resolver's 200 body has no captured fixture yet; the page needs text and status.
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({
       text: statement,
@@ -45,8 +46,9 @@ const server = createServer(async (request, response) => {
   }
 
   if (url.pathname.startsWith('/api/s/')) {
-    response.writeHead(404, { 'content-type': 'application/json' });
-    response.end(JSON.stringify({ error: 'not_found' }));
+    // Status only: no capture of the resolver's refusal exists, so no body is invented.
+    response.writeHead(404);
+    response.end();
     return;
   }
 
