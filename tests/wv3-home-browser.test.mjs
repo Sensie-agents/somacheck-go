@@ -34,6 +34,8 @@ const RECEIPT = sendOk.body.request_id;
 const DRAFT = draftsCreate.body.drafts[0].id;
 const LINES = draftsCreate.body.drafts.map((d) => d.statement);
 const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' }, body: JSON.stringify(body) });
+// status-only stub: no invented body for refusals that have no capture yet (pending capture)
+const bare = (route, status) => route.fulfill({ status, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' } });
 const PICKS = [
   pickEnvelope('shared_link', { slug: 'pick-one', statement: 'I trust my gut over my dashboard.' }),
   pickEnvelope('closest_to_unlock', { slug: 'pick-two', statement: 'I feel ready for Monday.', contributor_count: 2, aligned: null, unaligned: null, lean: null }),
@@ -80,20 +82,20 @@ async function open(width, opts = {}) {
     }
     if (/^\/v1\/me\/vibecheck\/drafts\/[^/]+\/ask$/.test(u.pathname)) { log.draftAsks.push({ path: u.pathname, auth: headers.authorization }); return json(route, privateAsk.body, privateAsk.status); }
     if (u.pathname === '/v1/me/world-vibe/consent') {
-      if (!headers.authorization) return json(route, { error: 'unauthorized' }, 401);
+      if (!headers.authorization) return bare(route, 401);
       if (req.method() === 'PUT') { const b = JSON.parse(req.postData()); log.consentWrites.push({ body: b, headers }); consent = b.world_vibe_private; return json(route, consentBody(consent)); }
       log.consentReads.push({ headers });
       return json(route, consentBody(consent));
     }
     if (u.pathname === '/v1/me/world-vibe/phone') {
       log.phone.push(headers.authorization);
-      if (!headers.authorization) return json(route, { error: 'unauthorized' }, 401);
+      if (!headers.authorization) return bare(route, 401);
       return json(route, phoneBody(opts.linked !== false));
     }
     if (u.pathname.startsWith('/v1/public/world-vibe/items/') && !u.pathname.endsWith('/progress')) {
       log.items.push({ path: u.pathname, auth: headers.authorization });
       const it = opts.item;
-      if (typeof it === 'number') return json(route, { error: 'x' }, it);
+      if (typeof it === 'number') return bare(route, it);
       return json(route, it || itemRow({ slug: decodeURIComponent(u.pathname.split('/').pop()) }));
     }
     if (u.pathname === '/v1/public/world-vibe/feed') return json(route, { items: [feedRow], next_cursor: null });
