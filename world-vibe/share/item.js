@@ -1,5 +1,5 @@
 import { DEFAULT_API, itemSlugFromSearch, loadItem } from '../home/home-data.js';
-import { itemProgress, universalLink, PUBLIC_SIGNAL_LABEL } from './item-logic.js';
+import { itemProgress, universalLink } from './item-logic.js';
 
 const API = window.SOMACHECK_API_BASE || DEFAULT_API;
 const $ = (id) => document.getElementById(id);
@@ -16,8 +16,6 @@ async function main() {
   $('line').textContent = r.item.statement;
   $('headline').textContent = p.headline;
   $('detail').textContent = p.detail;
-  $('public').hidden = r.item.public_signals !== true;
-  $('public').textContent = PUBLIC_SIGNAL_LABEL;
   $('open').href = universalLink(slug);
   show('item');
 }

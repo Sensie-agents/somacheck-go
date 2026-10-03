@@ -76,7 +76,7 @@ function checkContext() {
 
 function sheetHtml(kind) {
   if (kind === 'check') return head('Check in on') + renderCheckSheet(checkContext());
-  if (kind === 'bring') return head('Bring your own line') + renderBringSheet();
+  if (kind === 'bring') return head('Bring your own vibecheck') + renderBringSheet();
   if (kind === 'signin') return head('Sign in') + renderSignInSheet(signinEmail ? 'sent' : undefined, { email: signinEmail || '' });
   const S = [
     ['Capture', 'Highlight any line on the web and write your take in one sentence.', 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4'],

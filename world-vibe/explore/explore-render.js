@@ -41,7 +41,7 @@ export function renderPost(item) {
     ? '<span class="av" style="background:' + tint(name) + '" aria-hidden="true">' + esc(initials(name)) + '</span>'
     : '<span class="av anon" aria-hidden="true"></span>';
   const who = name ? '<b>' + esc(name) + '</b>' : '<b>Anonymous</b>';
-  const label = item.public_signals === true ? '<span class="public-label">' + PUBLIC_SIGNAL_LABEL + '</span>' : '';
+  const label = '';
   const src = item.quote || item.domain
     ? (href ? '<a class="src" href="' + esc(href) + '" target="_blank" rel="noopener">' : '<span class="src">') +
       (item.domain ? '<em>' + esc(item.domain) + '</em>' : '') + (item.quote ? '<span>' + esc(item.quote) + '</span>' : '') +
@@ -168,7 +168,7 @@ export function renderHero(featured) {
   const progress = c < t && !shared
     ? '<div class="progress"><span class="dots big" aria-hidden="true">' + dots + '</span><span><b>' + c + ' of ' + t + '</b> checked in. You could be the one who reveals it.</span></div>'
     : renderMeter(featured);
-  const label = featured.public_signals === true ? '<span class="public-label">' + PUBLIC_SIGNAL_LABEL + '</span>' : '';
+  const label = '';
   return '<article class="totw" aria-labelledby="totw-h"><span class="eyebrow"><i></i>TOPIC OF THE WEEK</span>' +
     '<h2 id="totw-h">' + esc(featured.statement) + '</h2>' + label + progress +
     '<button class="btn-main" type="button" data-check="' + esc(featured.statement) + '" data-slug="' + esc(featured.slug) + '">' + PHONE + 'Check in</button>' +

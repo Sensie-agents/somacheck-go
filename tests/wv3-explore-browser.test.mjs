@@ -216,7 +216,7 @@ await check('public-signal card never shows the curator name in the DOM', async 
   const { page } = await open(1280);
   const body = await page.content();
   assert.ok(!body.includes('Should Never Render'));
-  assert.ok(body.includes('Shown publicly by choice'));
+  assert.ok(!body.includes('Shown publicly by choice'), 'the public-signal label is gone');
   await page.close();
 });
 

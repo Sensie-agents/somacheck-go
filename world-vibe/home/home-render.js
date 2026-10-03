@@ -2,7 +2,9 @@
 // data (world_vibe_public_feed_v2 fields plus reason, category, curator_name)
 // and returns an HTML string. No DOM, no network.
 
-export const PUBLIC_SIGNAL_LABEL = 'Shown publicly by choice';
+// The public-signal label was removed from the UI on 2026-10-03 (Mike): the
+// consented split speaks for itself. Kept as an empty export for importers.
+export const PUBLIC_SIGNAL_LABEL = '';
 export const DEFAULT_THRESHOLD = 3;
 export const EXACT_COUNT_FROM = 10;
 
@@ -108,7 +110,7 @@ function tint(name) {
 function byLine(pick) {
   const name = visibleCuratorName(pick);
   const src = pick.domain ? '<span class="src">' + (name ? '· ' : '') + esc(pick.domain) + '</span>' : '';
-  const label = pick.public_signals === true ? '<span class="public-label">' + PUBLIC_SIGNAL_LABEL + '</span>' : '';
+  const label = '';
   if (!name && !src && !label) return '';
   const who = name
     ? '<span class="av" style="background:' + tint(name) + '" aria-hidden="true">' + esc(initials(name)) + '</span><span>Brought by <b>' + esc(name) + '</b></span>'
@@ -123,7 +125,7 @@ export function renderSharedCard(pick) {
     byLine(pick) +
     renderMeter(pick) +
     '<button class="btn-main" type="button" data-act="check">' + PHONE + 'Check in</button>' +
-    '<div class="quiet"><button type="button" data-act="skip">Not this one</button><button type="button" data-open="bring">Bring your own line</button></div></article>';
+    '<div class="quiet"><button type="button" data-act="skip">Not this one</button><button type="button" data-open="bring">Bring your own vibecheck</button></div></article>';
 }
 
 // After a check-in: progress comes from the server (item progress plus the
@@ -138,7 +140,6 @@ export function renderReveal(progress) {
     '<span class="reveal-head">' + (revealed ? 'YOU REVEALED IT' : "YOU'RE IN") + '</span>' +
     '<p class="thanks">' + (revealed ? 'Your check-in unlocked the vibe.' : 'Thanks. The room just got one body clearer.') + '</p>' +
     '<p class="echo">' + esc(progress.statement) + '</p>' +
-    (progress.public_signals === true ? '<div class="by"><span class="public-label">' + PUBLIC_SIGNAL_LABEL + '</span></div>' : '') +
     renderMeter(progress) + own +
     '<p class="fine left">' + (own ? '' : 'Your own reading is in your SomaCheck app. ') + 'Here you only ever see the room, never who.</p>' +
     '<button class="btn-main" type="button" data-act="next">One more?</button>' +
@@ -151,7 +152,6 @@ export function renderRoom(progress) {
   return '<article class="card enter" aria-label="The room so far">' +
     '<span class="reveal-head">THE ROOM SO FAR</span>' +
     '<p class="echo">' + esc(progress.statement) + '</p>' +
-    (progress.public_signals === true ? '<div class="by"><span class="public-label">' + PUBLIC_SIGNAL_LABEL + '</span></div>' : '') +
     renderMeter(progress) +
     '<p class="fine left">Here you only ever see the room, never who. Your own reading stays in your SomaCheck app.</p>' +
     '<button class="btn-main" type="button" data-act="next">One more?</button></article>';

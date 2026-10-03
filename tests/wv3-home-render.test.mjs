@@ -109,21 +109,21 @@ test('an unknown reason falls back to a plain sentence, never raw text', () => {
   assert.equal(reasonSentence(pickOf('<b>x</b>')), 'Picked by relevance.');
 });
 
-test('public-signal item shows the label and never a curator name', () => {
+test('public-signal item shows no label and never a curator name', () => {
   const item = { ...publicSignalRow, curator_name: 'Should Never Show' };
   const html = renderSharedCard({ ...item, reason: 'most_checked' });
-  assert.match(html, /Shown publicly by choice/);
+  assert.doesNotMatch(html, /Shown publicly by choice|public-label/);
   assert.ok(!html.includes('Should Never Show'));
   assert.doesNotMatch(html, /Brought by/);
   const reveal = renderReveal({ ...item, revealed_by_you: false });
-  assert.match(reveal, /Shown publicly by choice/);
+  assert.doesNotMatch(reveal, /Shown publicly by choice|public-label/);
   assert.ok(!reveal.includes('Should Never Show'));
   assert.doesNotMatch(renderReveal({ ...item, public_signals: false }), /Shown publicly by choice/);
 });
 
-test('captured public-signal row: consented counts, label on card and reveal', () => {
+test('captured public-signal row: consented counts, no label on card and reveal', () => {
   const card = renderSharedCard({ ...publicSignalRow, reason: 'most_checked' });
-  assert.match(card, /Shown publicly by choice/);
+  assert.doesNotMatch(card, /Shown publicly by choice/);
   assert.match(card, /100%/);
   assert.doesNotMatch(card, /1 of 3/);
 });

@@ -4,7 +4,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { selectItems, renderFeed, renderEnd, focusSelector, nextTab, trapTarget, renderPost, renderCuratorList, renderStrip, renderFilterText, renderHero, PUBLIC_SIGNAL_LABEL } from '../world-vibe/explore/explore-render.js';
+import { selectItems, renderFeed, renderEnd, focusSelector, nextTab, trapTarget, renderPost, renderCuratorList, renderStrip, renderFilterText, renderHero } from '../world-vibe/explore/explore-render.js';
 import { loadFeed, loadFeedInto, retryCursor, loadCurators, loadFeatured, loadFollowing } from '../world-vibe/explore/explore-data.js';
 import { refusal } from './helpers/captured.mjs';
 import { getAccessToken } from '../world-vibe/session.js';
@@ -420,7 +420,7 @@ test('Topic of the Week hero renders the real /featured payload', () => {
   assert.match(html, /TOPIC OF THE WEEK/);
   assert.match(html, /<h2 id="totw-h">I feel ready for this<\/h2>/);
   assert.match(html, new RegExp('data-check="I feel ready for this"'));
-  assert.match(html, new RegExp(PUBLIC_SIGNAL_LABEL));
+  assert.doesNotMatch(html, /Shown publicly by choice|public-label/, 'the public-signal label is gone');
   assert.match(text(html), /100% aligned/);
   assert.equal(renderHero(null), '');
 });
@@ -431,7 +431,7 @@ test('hero reveal ladder: under threshold only big dots and "n of T", never a le
   assert.equal((html.match(/<i class="on">/g) || []).length, 2);
   assert.match(text(html), /2 of 3 checked in\. You could be the one who reveals it\./);
   assert.doesNotMatch(text(html), /%|Leans|Mixed/);
-  assert.doesNotMatch(html, new RegExp(PUBLIC_SIGNAL_LABEL));
+  assert.doesNotMatch(html, /Shown publicly by choice|public-label/);
 });
 
 test('hero reveal ladder: lean without numbers at 3-9, split only at 10+', () => {
@@ -454,7 +454,7 @@ test('real feed row at 10 of 3 renders the exact split; the real public item sho
   assert.match(text(renderPost(REAL.feed)), /100% aligned/);
   assert.match(renderPost(REAL.feed), /<b>Alex<\/b>/);
   const pub = renderPost(REAL.item);
-  assert.match(pub, new RegExp(PUBLIC_SIGNAL_LABEL));
+  assert.doesNotMatch(pub, /Shown publicly by choice|public-label/, 'the public-signal label is gone');
   assert.match(pub, /<b>Anonymous<\/b>/);
 });
 
