@@ -198,7 +198,7 @@ function consentRoute() {
   return recorder(async (u, init) => {
     assert.equal(u.pathname, '/v1/me/world-vibe/consent');
     const who = (init.headers || {}).Authorization;
-    if (!who) return res(401, { error: 'unauthorized' });
+    if (!who) return res(401, {});
     if (init.method === 'PUT') { flags.set(who, JSON.parse(init.body).world_vibe_private === true); return res(200, consentBody(flags.get(who))); }
     return res(200, consentBody(flags.get(who) === true));
   });
