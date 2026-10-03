@@ -81,7 +81,7 @@ export function createSession({ fetch: fetchFn, storage, supabaseUrl = DEFAULT_S
         const r = await fetchFn(supabaseUrl + '/auth/v1/verify', {
           method: 'POST', headers: headers(), body: JSON.stringify({ type: 'email', email: e, token: c })
         });
-        if (!r.ok) return { error: r.status === 429 ? 'rate_limited' : 'bad_code' };
+        if (!r.ok) return { error: r.status === 429 ? 'rate_limited' : r.status >= 500 ? 'unavailable' : 'bad_code' };
         const t = await r.json();
         if (started !== epochNow()) return { error: 'signed_out' };
         storage.removeItem(VERIFIER_KEY);

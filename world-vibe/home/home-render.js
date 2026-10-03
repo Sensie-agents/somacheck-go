@@ -238,7 +238,8 @@ export const SIGNIN_STATUS = {
   bad_code: "That code didn't work. Check it, or send yourself a new one.",
   signed_out: 'Sign in again.',
   rate_limited: 'Too many tries. Wait a minute and try again.',
-  unavailable: "Couldn't send the link. Try again in a moment."
+  unavailable: "Couldn't send the link. Try again in a moment.",
+  verify_unavailable: "Couldn't check the code. Try again in a moment."
 };
 // Two stages. Before the email is sent: the email field. After it ("sent" with
 // the address): the six-digit code field, so a person who reads the email on
@@ -247,7 +248,7 @@ export function renderSignInSheet(status, { email = '' } = {}) {
   if (email) {
     return '<p class="fine" id="si-status" role="status">' + esc(SIGNIN_STATUS[status] || SIGNIN_STATUS.sent) + '</p>' +
       '<form id="code-form" novalidate><input type="hidden" name="email" value="' + esc(email) + '">' +
-      '<div class="field"><label for="si-code">Six-digit code</label><input id="si-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="6" required></div>' +
+      '<div class="field"><label for="si-code">Six-digit code</label><input id="si-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" required></div>' +
       '<button class="btn-main" type="submit">Sign in with the code</button></form>' +
       '<p class="fine">Sent to ' + esc(email) + '. No password. Signing in lets you send lines to your phone and see your own readings.</p>';
   }

@@ -160,9 +160,16 @@ document.addEventListener('submit', async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
   const r = await session.verifyCode(String(fd.get('email') || ''), String(fd.get('code') || ''));
-  if (r.ok) { if (st.sheet === 'signin') closeSheet(); return; }
+  if (r.ok) {
+    if (st.sheet === 'signin') closeSheet();
+    // The control that opened the sheet is gone (the account bar now shows the
+    // address), so closeSheet could not restore focus: park it on the card.
+    const acct = document.getElementById('account');
+    if (acct) { acct.tabIndex = -1; acct.focus(); } else focusCard();
+    return;
+  }
   const status = document.getElementById('si-status');
-  if (status) status.textContent = SIGNIN_STATUS[r.error] || SIGNIN_STATUS.unavailable;
+  if (status) status.textContent = SIGNIN_STATUS[r.error === 'unavailable' ? 'verify_unavailable' : r.error] || SIGNIN_STATUS.verify_unavailable;
 });
 
 // Keep Tab inside the open sheet; Escape closes it.

@@ -360,7 +360,7 @@ test('verifyCode: the six-digit code goes to GoTrue verify with the publishable 
   assert.equal(v.init.method, 'POST');
   assert.deepEqual(v.body, { type: 'email', email: 'me@x.test', token: '123456' });
   assert.equal(v.init.headers.apikey, KEY);
-  assert.equal(v.init.headers.authorization, undefined);
+  assert.ok(!Object.keys(v.init.headers).some((k) => k.toLowerCase() === 'authorization'), 'no Authorization header in any casing');
   assert.equal(s.getAccessToken(), 'access-c');
   assert.equal(s.email(), 'me@x.test');
   assert.equal(storage.getItem('wv.pkce'), null, 'the pending link verifier is dropped once the code signed the person in');
@@ -382,6 +382,7 @@ test('verifyCode maps a rejected code, 429 and failures to honest errors and sta
   assert.deepEqual(await a.s.verifyCode('me@x.test', '123456'), { error: 'bad_code' });
   assert.equal(a.s.getAccessToken(), null);
   assert.deepEqual(await make({ fetch: gotrue({ verify: 429 }) }).s.verifyCode('me@x.test', '123456'), { error: 'rate_limited' });
+  assert.deepEqual(await make({ fetch: gotrue({ verify: 500 }) }).s.verifyCode('me@x.test', '123456'), { error: 'unavailable' }, 'a server failure is not reported as a wrong code');
   assert.deepEqual(await make({ fetch: async () => { throw new TypeError('offline'); } }).s.verifyCode('me@x.test', '123456'), { error: 'unavailable' });
 });
 

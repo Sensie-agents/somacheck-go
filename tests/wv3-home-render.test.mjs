@@ -259,6 +259,7 @@ test('sign-in sheet, once the email is sent, asks for the six-digit code and kee
   assert.match(html, /<label for="si-code">Six-digit code<\/label>/);
   assert.match(html, /id="si-code"[^>]*inputmode="numeric"/);
   assert.match(html, /id="si-code"[^>]*autocomplete="one-time-code"/);
+  assert.doesNotMatch(html, /maxlength/, 'a pasted "123 456" must not be cut short by the field');
   assert.match(html, /role="status"[^>]*>Check your email\. Click the sign-in link on this device, or enter the six-digit code here\./);
   assert.match(renderSignInSheet('bad_code', { email: 'a@x.test' }), /role="status"[^>]*>That code didn&#39;t work|role="status"[^>]*>That code didn't work/);
 });
