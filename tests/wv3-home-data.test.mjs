@@ -134,8 +134,9 @@ test('send to phone: a replay (200) still returns the receipt', async () => {
 
 test('send to phone: every refusal maps to its own status', async () => {
   assert.deepEqual(await sendToPhone(recorder(() => res(sendLinkRequired.status, sendLinkRequired.body)), API, 'x', 't'), { status: 'link_required' });
-  const cases = [[401, 'signin'], [422, 'link_required'], [429, 'rate_limited'], [409, 'pending'], [404, 'error'], [500, 'error']];
-  for (const [code, status] of cases) assert.deepEqual(await sendToPhone(recorder(() => res(code, { error: 'x' })), API, 'x', 't'), { status }, String(code));
+  // 422 is replayed from its capture above. 401/429/409/404 have no capture (PENDING CAPTURE, integration Round 7): status-only, no body.
+  const cases = [[401, 'signin'], [429, 'rate_limited'], [409, 'pending'], [404, 'error'], [500, 'error']];
+  for (const [code, status] of cases) assert.deepEqual(await sendToPhone(recorder(() => res(code, {})), API, 'x', 't'), { status }, String(code));
   assert.deepEqual(await sendToPhone(async () => { throw new TypeError('offline'); }, API, 'x', 't'), { status: 'error' });
 });
 
@@ -164,6 +165,7 @@ test('drafts: returns the drafts; 403 is consent_required; 422 differs by source
   assert.deepEqual(await generateDrafts(recorder(() => res(draftsCreate.status, draftsCreate.body)), API, { source: 'agent' }, 't'), { drafts: d });
   assert.deepEqual(await generateDrafts(recorder(() => res(draftsConsentRequired.status, draftsConsentRequired.body)), API, { source: 'agent' }, 't'), { error: 'consent_required' });
   assert.deepEqual(await generateDrafts(recorder(() => res(401, {})), API, { source: 'agent' }, 't'), { error: 'signin' });
+  // drafts 422 (no_context / invalid_words): PENDING CAPTURE (integration Round 7), status-only.
   assert.deepEqual(await generateDrafts(recorder(() => res(422, {})), API, { source: 'agent' }, 't'), { error: 'no_context' });
   assert.deepEqual(await generateDrafts(recorder(() => res(422, {})), API, { source: 'words', words: 'x' }, 't'), { error: 'invalid_words' });
   assert.deepEqual(await generateDrafts(recorder(() => res(200, { ...draftsCreate.body, drafts: [] })), API, { source: 'agent' }, 't'), { error: 'unavailable' });
@@ -172,13 +174,14 @@ test('drafts: returns the drafts; 403 is consent_required; 422 differs by source
 
 const UUID = draftsCreate.body.drafts[0].id;
 test('private ask: POSTs the draft id with the bearer; nothing is sent signed out', async () => {
-  const f = recorder(() => res(sendOk.status, sendOk.body));
-  assert.deepEqual(await askPrivate(f, API, UUID, 'tok'), { status: 'sent', requestId: sendOk.body.request_id });
+  const f = recorder(() => res(privateAsk.status, privateAsk.body));
+  assert.deepEqual(await askPrivate(f, API, UUID, 'tok'), { status: 'sent', requestId: privateAsk.body.request_id });
+  assert.equal(privateAsk.status, 201);
   assert.equal(new URL(f.calls[0].url).pathname, '/v1/me/vibecheck/drafts/' + UUID + '/ask');
   const g = recorder(() => res(privateAsk.status, privateAsk.body));
   assert.deepEqual(await askPrivate(g, API, UUID, null), { status: 'signin' });
   assert.equal(g.calls.length, 0);
-  assert.deepEqual(await askPrivate(recorder(() => res(409, { error: 'ask_unavailable' })), API, UUID, 't'), { status: 'error' });
+  assert.deepEqual(await askPrivate(recorder(() => res(409, {})), API, UUID, 't'), { status: 'error' });
 });
 
 // pending capture: the private ask has no dedicated capture yet (integration Round 7).
@@ -263,7 +266,7 @@ test('item route: loads the captured item by slug; unknown, malformed or mismatc
   assert.deepEqual(await loadItem(f, API, body.slug), { item: body, error: null });
   assert.equal(f.calls[0].url, API + '/v1/public/world-vibe/items/' + body.slug);
   assert.equal((f.calls[0].init.headers || {}).Authorization, undefined);
-  assert.deepEqual(await loadItem(recorder(() => res(404, { error: 'not_found' })), API, 'gone-item'), { item: null, error: 'not_found' });
+  assert.deepEqual(await loadItem(recorder(() => res(404, {})), API, 'gone-item'), { item: null, error: 'not_found' });
   assert.deepEqual(await loadItem(recorder(() => res(500, {})), API, 'x-1'), { item: null, error: 'unavailable' });
   assert.deepEqual(await loadItem(recorder(() => res(200, body)), API, 'other-slug'), { item: null, error: 'unavailable' });
   for (const bad of [null, '', 'Not A Slug', '../x', 'x'.repeat(101)]) {
