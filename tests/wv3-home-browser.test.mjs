@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pickEnvelope, progressEnvelope, consentBody, phoneBody, itemRow, sendOk, sendLinkRequired, draftsCreate, draftsConsentRequired } from './helpers/captured.mjs';
+import { pickAnon, progressLocked, progressLean, progressExact, pickEnvelope, progressEnvelope, consentBody, phoneBody, itemRow, sendOk, sendLinkRequired, draftsCreate, draftsConsentRequired } from './helpers/captured.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || '/opt/homebrew/lib/node_modules/playwright');
@@ -78,7 +78,7 @@ async function open(width, opts = {}) {
       if (opts.draftsStatus) return json(route, draftsConsentRequired.body, opts.draftsStatus);
       return json(route, draftsCreate.body);
     }
-    if (/^\/v1\/me\/vibecheck\/drafts\/[^/]+\/ask$/.test(u.pathname)) { log.draftAsks.push({ path: u.pathname, auth: headers.authorization }); return json(route, { request_id: 'rq-private', source: 'world_vibe_private', status: 'pending' }, 201); }
+    if (/^\/v1\/me\/vibecheck\/drafts\/[^/]+\/ask$/.test(u.pathname)) { log.draftAsks.push({ path: u.pathname, auth: headers.authorization }); return json(route, sendOk.body, sendOk.status); }
     if (u.pathname === '/v1/me/world-vibe/consent') {
       if (!headers.authorization) return json(route, { error: 'unauthorized' }, 401);
       if (req.method() === 'PUT') { const b = JSON.parse(req.postData()); log.consentWrites.push({ body: b, headers }); consent = b.world_vibe_private; return json(route, consentBody(consent)); }
@@ -156,6 +156,29 @@ await check('"Not this one" grows the exclude list on each pick', async () => {
   assert.match(await page.locator('.why').textContent(), /From a curator you follow\./);
   await page.close();
 });
+
+await check('signed out: the anonymous pick capture renders as a shared link, no bearer', async () => {
+  const { page, log, errors } = await open(420, { picks: [pickAnon.body] });
+  assert.match(await page.locator('.why').textContent(), /Picked for you · Someone shared this with you\./);
+  assert.equal(await page.locator('.line').textContent(), pickAnon.body.item.statement);
+  assert.deepEqual(bearers(log), []);
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+for (const [name, cap, want] of [['locked', progressLocked, /0 of 3 checked in/], ['lean', progressLean, /Leans aligned · 3 checked in/], ['exact', progressExact, /50% aligned/]]) {
+  await check('the ' + name + ' progress capture drives the reveal ladder on the card', async () => {
+    const { page } = await open(420, { signedIn: true, progress: [{ ...cap, slug: 'pick-one', your_checkin_counted: true }] });
+    await page.locator('[data-act="check"]').click();
+    await page.locator('[data-act="send"]').click();
+    await page.waitForFunction(() => document.getElementById('sent').textContent.includes('Sent'));
+    await page.locator('[data-act="checked"]').click();
+    await page.waitForSelector('.reveal-head');
+    assert.match((await page.locator('.meter').textContent()).replace(/\s+/g, ' '), want);
+    if (cap !== progressExact) assert.doesNotMatch(await page.locator('.meter').textContent(), /%/);
+    await page.close();
+  });
+}
 
 await check('closest_to_unlock shows the head count and the reveal ladder, not a lean', async () => {
   const { page } = await open(420);

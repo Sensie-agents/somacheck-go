@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createFlow } from '../world-vibe/home/home-flow.js';
-import { pickEnvelope, progressEnvelope, consentBody, phoneBody, sendOk, sendLinkRequired, draftsCreate, draftsConsentRequired } from './helpers/captured.mjs';
+import { pickAnon, pickEnvelope, progressEnvelope, consentBody, phoneBody, sendOk, sendLinkRequired, draftsCreate, draftsConsentRequired } from './helpers/captured.mjs';
 
 const API = 'https://api.test';
 const RECEIPT = sendOk.body.request_id;
@@ -39,6 +39,14 @@ function harness({ routes = {}, signedIn = true } = {}) {
 const flush = () => new Promise((r) => setTimeout(r, 0));
 const PICK = pickEnvelope('following', { slug: 'pick-one', statement: 'I trust my gut over my dashboard.' });
 const base = { 'GET /v1/public/world-vibe/pick': res(200, PICK) };
+
+test('signed out: the anonymous pick capture is shown and nothing personal is requested', async () => {
+  const h = harness({ signedIn: false, routes: { 'GET /v1/public/world-vibe/pick': res(pickAnon.status, pickAnon.body) } });
+  await h.flow.showPick();
+  assert.equal(h.st.pick.slug, pickAnon.body.item.slug);
+  assert.equal(h.st.pick.reason, 'shared_link');
+  assert.deepEqual(h.calls.filter((c) => c.key.includes('/me/')), []);
+});
 
 test('sign-out clears the own reading, the receipt and every other piece of personal state', async () => {
   const h = harness({ routes: {
@@ -171,7 +179,7 @@ test('moving to another item mid-poll drops the old item\'s progress', async () 
 });
 
 test('a private ask that resolves after a lane switch does not touch the shared sheet state', async () => {
-  const h = harness({ routes: { ...base, ['POST /v1/me/vibecheck/drafts/' + DRAFT + '/ask']: { hold: res(201, { request_id: 'rq-9', source: 'world_vibe_private', status: 'pending' }) } } });
+  const h = harness({ routes: { ...base, ['POST /v1/me/vibecheck/drafts/' + DRAFT + '/ask']: { hold: res(sendOk.status, sendOk.body) } } });
   await h.flow.showPick();
   h.flow.selectLane('private');
   h.st.drafts = [draftsCreate.body.drafts[0]]; h.st.generated = true;
@@ -402,7 +410,7 @@ test('drafts: a generate that resolves after the lane moved on does not store th
 
 test('private ask: an ask that resolves after sign-out does not mark the line sent', async () => {
   const ASK = 'POST /v1/me/vibecheck/drafts/' + DRAFT + '/ask';
-  const h = harness({ routes: { ...base, [ASK]: { hold: res(201, { request_id: 'rq-9', source: 'world_vibe_private', status: 'pending' }) } } });
+  const h = harness({ routes: { ...base, [ASK]: { hold: res(sendOk.status, sendOk.body) } } });
   await h.flow.showPick();
   h.flow.selectLane('private');
   h.st.drafts = [draftsCreate.body.drafts[0]]; h.st.generated = true;

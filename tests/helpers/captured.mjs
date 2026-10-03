@@ -20,6 +20,8 @@ export const pickOf = (reason, over = {}) => ({ ...feedRow, reason, ...over });
 // The route envelopes, built around captured rows.
 // The route captures (status + body), replayed unchanged. Variants spread a
 // captured body and override only the fields a test is about.
+export const pickAnon = load('wv3_pick_anon.json');
+export const createV3 = load('wv3_create_v3.json');
 export const pickSignedIn = load('wv3_pick_signed_in.json').body;
 export const pickEnvelope = (reason, over = {}) => ({ item: { ...pickSignedIn.item, ...over }, reason });
 export const progressCapture = load('wv3_progress_revealed_by_you.json').body;

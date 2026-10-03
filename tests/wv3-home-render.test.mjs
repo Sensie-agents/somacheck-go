@@ -4,51 +4,68 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderSharedCard, renderMeter, renderReveal, renderRoom, renderPrivateCard, renderCheckSheet, renderBringSheet, renderSignInSheet, renderAccountBar, renderEmpty, reasonSentence } from '../world-vibe/home/home-render.js';
-import { feedRow, publicSignalRow, row, pickOf, progressEnvelope } from './helpers/captured.mjs';
+import { feedRow, publicSignalRow, row, pickOf, progressEnvelope, progressLocked, progressLean, progressExact } from './helpers/captured.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const homeDir = path.join(root, 'world-vibe', 'home');
 const text = (html) => html.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ');
 
-const gather2 = row({ contributor_count: 2, aligned: null, unaligned: null, lean: null });
-const lean5 = row({ contributor_count: 5, aligned: null, unaligned: null, lean: 'mixed' });
-const split12 = row({ contributor_count: 12, aligned: 9, unaligned: 3 });
-
-test('contributors 2: dots and "2 of 3", no percent', () => {
-  const html = renderMeter(gather2);
+// The reveal ladder is driven by the captured progress rows: locked (below the
+// threshold), lean (threshold to 9) and exact (10 and above).
+test('locked capture: dots and "0 of 3", no lean, no percent', () => {
+  assert.equal(progressLocked.lean, null);
+  const html = renderMeter(progressLocked);
   assert.match(html, /class="dots"/);
+  assert.match(html, /0 of 3 checked in/);
+  assert.equal((html.match(/<i class="on">/g) || []).length, 0);
+  assert.doesNotMatch(html, /%/);
+  assert.doesNotMatch(html, /Leans|Mixed so far/);
+});
+
+test('locked, one more in: the dots count up to the threshold without a percent', () => {
+  const html = renderMeter({ ...progressLocked, contributor_count: 2 });
   assert.match(html, /2 of 3 checked in/);
   assert.equal((html.match(/<i class="on">/g) || []).length, 2);
   assert.doesNotMatch(html, /%/);
 });
 
-test('lean with aligned=NULL: track, head count, no percentages', () => {
-  assert.equal(lean5.aligned, null);
-  const html = renderMeter(lean5);
-  assert.match(html, /class="track"/);
-  assert.match(text(html), /Mixed so far · 5 checked in/);
+test('lean capture (aligned=NULL): lean and head count, no percentages, no dots', () => {
+  assert.equal(progressLean.aligned, null);
+  const html = renderMeter(progressLean);
+  assert.match(text(html), /Leans aligned · 3 checked in/);
   assert.doesNotMatch(text(html), /%/);
-  assert.doesNotMatch(text(html).replace('5 checked in', ''), /\d/);
-  assert.doesNotMatch(html, /class="dots"/);
+  assert.doesNotMatch(text(html).replace('3 checked in', ''), /\d/);
+  assert.doesNotMatch(html, /class="dots"|class="split"/);
+  const mixed = renderMeter({ ...progressLean, lean: 'mixed', contributor_count: 5 });
+  assert.match(text(mixed), /Mixed so far · 5 checked in/);
+  assert.doesNotMatch(text(mixed), /%/);
 });
 
-test('contributors 12 with counts: percent bar', () => {
-  const html = renderMeter(split12);
+test('exact capture (10 checked in, 5 and 5): the exact split', () => {
+  const html = renderMeter(progressExact);
   assert.match(html, /class="split"/);
+  assert.match(html, /50% aligned/);
+  assert.match(html, /50% unaligned/);
+  assert.match(html, /10 checked in/);
+  assert.match(renderReveal(progressExact), /50% aligned/);
+});
+
+test('exact capture with a skewed split and a 12-contributor head count', () => {
+  const html = renderMeter({ ...progressExact, contributor_count: 12, aligned: 9, unaligned: 3, lean: 'aligned' });
   assert.match(html, /75% aligned/);
   assert.match(html, /25% unaligned/);
   assert.match(html, /12 checked in/);
 });
 
-test('the captured 10-contributor row shows its exact split (10 aligned, 0 unaligned)', () => {
+test('the captured 10-contributor feed row shows its exact split (10 aligned, 0 unaligned)', () => {
   const html = renderMeter(feedRow);
   assert.match(html, /100% aligned/);
   assert.match(html, /10 checked in/);
 });
 
 test('exact-count rule: threshold 20 with 12 contributors shows no split and no lean', () => {
-  const item = row({ contributor_count: 12, unlock_threshold: 20, aligned: 9, unaligned: 3, lean: 'aligned' });
-  for (const html of [renderMeter(item), renderReveal({ ...item, statement: 'I am ready.' })]) {
+  const item = { ...progressExact, contributor_count: 12, unlock_threshold: 20, aligned: 9, unaligned: 3, lean: 'aligned' };
+  for (const html of [renderMeter(item), renderReveal(item)]) {
     assert.doesNotMatch(text(html), /%/);
     assert.doesNotMatch(html, /class="split"/);
     assert.doesNotMatch(html, /Leans|Mixed so far/);
