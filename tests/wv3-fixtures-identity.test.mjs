@@ -1,6 +1,7 @@
 // The contract fixtures are captured, never written by hand. Each file here is a
 // byte copy of the backend worktrees' statement-api/fixtures/ (integration
-// b68279fa and 59515bad; wv3_consent.json from consent-api-sol2 91580176). The
+// b68279fa, 59515bad and 4e35e548 for the private ask, empty pick and refusals; wv3_consent.json from
+// consent-api-sol2 91580176). The
 // hashes pin the bytes, and the backend worktrees are compared directly when
 // they exist, so a hand edit fails either way.
 import test from 'node:test';
@@ -31,7 +32,27 @@ const SHA256 = {
   'wv3_create_v3.json': 'fc77093cf6840e73a8441216d93aa940b0d1bab2c4527230d6e44bc6ae94307c',
   'wv3_phone.json': '2f317fe9599ccb49744eead8f57b74ad49ce372c0d130b823d1988691ba0360d',
   'wv3_phone_unlinked.json': 'dbf204b1173dd3720018d767944ce3b89ff1fd348b0e622230ae09f7933ed85b',
-  'wv3_consent.json': '02edb74014a211553ef98267973762f8cf3ddd9736a3a0242aca42b24796094e'
+  'wv3_consent.json': '02edb74014a211553ef98267973762f8cf3ddd9736a3a0242aca42b24796094e',
+  'wv3_refusal_ask_401.json': '0a433356e7056376f1f5ec20b07381e9bd2f3dfed7c2d1dec43bb1f2f6acc08d',
+  'wv3_refusal_ask_404.json': '4040a373151733c96de51697bc2c0b6e2fafb6cf58d60c84f82762ff4f784668',
+  'wv3_refusal_ask_409.json': '1d02084c09ace071e04cd20f5c1c1ce4c6fadea7e4a9d4b0a09d325f0fee8b13',
+  'wv3_refusal_ask_429.json': '899d9a9ca79d7314614dcd3f1125b61ae9c198be962613962bb7ad6d50b70a27',
+  'wv3_refusal_consent_get_401.json': '05e22ba7910ccefa4dfa31684c0283ffcbb81b041fd9fdeeaa13841a3019baee',
+  'wv3_refusal_consent_put_401.json': '05e22ba7910ccefa4dfa31684c0283ffcbb81b041fd9fdeeaa13841a3019baee',
+  'wv3_refusal_drafts_401.json': '05e22ba7910ccefa4dfa31684c0283ffcbb81b041fd9fdeeaa13841a3019baee',
+  'wv3_refusal_drafts_422_invalid_words.json': '7c4cb6f7780e8cbbfd62525a218ec79d68641938084d038366c5802d3b51ee27',
+  'wv3_refusal_drafts_422_no_context.json': '853b171c1fb9569b297749db41c7407934347eb8536c3c63ec581c9ead380a65',
+  'wv3_refusal_follow_delete_401.json': '5ac6fd86cc2ca763607cee7061f4b077df824c44045b8e4239e495832270c4ad',
+  'wv3_refusal_follow_post_401.json': '5ac6fd86cc2ca763607cee7061f4b077df824c44045b8e4239e495832270c4ad',
+  'wv3_refusal_following_feed_401.json': 'c7fa62a20471d0d626a26e69c9d2769e76ec14092342791a172feb9b35dcdc57',
+  'wv3_refusal_follows_401.json': '5b3b1a7b5491717f3bfd211f46c616c72bcde64d81859680e9b40d347870fe85',
+  'wv3_refusal_item_404.json': '278500f3542967062b4a309418d806031496a5bdac7f0b09bbf6ec08815b42f4',
+  'wv3_refusal_phone_401.json': '05e22ba7910ccefa4dfa31684c0283ffcbb81b041fd9fdeeaa13841a3019baee',
+  'wv3_refusal_private_ask_401.json': '05e22ba7910ccefa4dfa31684c0283ffcbb81b041fd9fdeeaa13841a3019baee',
+  'wv3_refusal_private_ask_404.json': '7f977ef0cc2248d37fd9f590e8eb13aa54706fc541012da69375c8db0f66063c',
+  'wv3_refusal_private_ask_409.json': '2efa47018aaefb20842bad38c6e2648a213f3f60466c861b635ef5453f7e6d47',
+  'wv3_pick_empty.json': 'e3ed4c1ee3e56ef1e547eca513ea401e17206e314072567ebef323110a1a3377',
+  'wv3_private_ask.json': '39b2bc4b3831311ccac3f839783c329ffdaee5839a4e75abc348b8c56d992459'
 };
 
 test('every captured fixture is byte-identical to its recorded capture', () => {
@@ -43,10 +64,10 @@ test('every captured fixture is byte-identical to its recorded capture', () => {
 // Where each capture lives in its backend worktree. When the sibling worktree is
 // present the bytes are compared directly, not only against the pinned hash.
 const BACKEND = (wt) => path.resolve(fixturesDir, '..', '..', '..', '..', wt, 'supabase', 'functions', 'statement-api', 'fixtures');
-const SOURCE = (name) => (name === 'wv3_consent.json' ? 'wv3-consent-sol2' : /phone/.test(name) ? 'wv3-backend-sol2' : 'wv3-integration');
+const SOURCE = (name) => (/^wv3_refusal_|^wv3_private_ask|^wv3_pick_empty/.test(name) ? 'wv3-integration' : name === 'wv3_consent.json' ? 'wv3-consent-sol2' : /phone/.test(name) ? 'wv3-backend-sol2' : 'wv3-integration');
 
-test('each home and consent capture is byte-identical to its backend worktree when present', () => {
-  for (const name of Object.keys(SHA256).filter((n) => /pick|progress|send|drafts|create_v3|consent|phone/.test(n))) {
+test('each home, consent and refusal capture is byte-identical to its backend worktree when present', () => {
+  for (const name of Object.keys(SHA256).filter((n) => /pick|progress|send|drafts|create_v3|consent|phone|private_ask|refusal/.test(n))) {
     let theirs;
     try { theirs = readFileSync(path.join(BACKEND(SOURCE(name)), name)); } catch { continue; }
     assert.ok(readFileSync(path.join(fixturesDir, name)).equals(theirs), name);

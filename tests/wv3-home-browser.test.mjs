@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pickAnon, progressLocked, progressLean, progressExact, pickEnvelope, progressEnvelope, consentBody, phoneBody, itemRow, sendOk, sendLinkRequired, draftsCreate, draftsConsentRequired, privateAsk, emptyPick, feedRow, curators, featuredRow } from './helpers/captured.mjs';
+import { pickAnon, progressLocked, progressLean, progressExact, pickEnvelope, progressEnvelope, consentBody, phoneBody, itemRow, sendOk, sendLinkRequired, draftsCreate, draftsConsentRequired, privateAsk, pickEmpty, refusal, emptyPick, feedRow, curators, featuredRow } from './helpers/captured.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || '/opt/homebrew/lib/node_modules/playwright');
@@ -34,7 +34,9 @@ const RECEIPT = sendOk.body.request_id;
 const DRAFT = draftsCreate.body.drafts[0].id;
 const LINES = draftsCreate.body.drafts.map((d) => d.statement);
 const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' }, body: JSON.stringify(body) });
-// status-only stub: no invented body for refusals that have no capture yet (pending capture)
+// A refusal is replayed from its capture: status and body unchanged.
+const refuse = (route, name) => { const c = refusal(name); return json(route, c.body, c.status); };
+// status-only stub for a 5xx (transport): no invented body
 const bare = (route, status) => route.fulfill({ status, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' } });
 const PICKS = [
   pickEnvelope('shared_link', { slug: 'pick-one', statement: 'I trust my gut over my dashboard.' }),
@@ -64,7 +66,7 @@ async function open(width, opts = {}) {
     const headers = await req.allHeaders();
     log.api.push({ url: u.pathname + u.search, auth: headers.authorization, method: req.method() });
     if (req.method() === 'OPTIONS') return json(route, {});
-    if (u.pathname === '/v1/public/world-vibe/pick') { log.pickUrls.push(u.search); const picks = opts.picks || PICKS; return json(route, picks[pickCalls++] || emptyPick); }
+    if (u.pathname === '/v1/public/world-vibe/pick') { log.pickUrls.push(u.search); const picks = opts.picks || PICKS; return json(route, picks[pickCalls++] || pickEmpty.body, pickEmpty.status); }
     if (u.pathname.endsWith('/progress')) {
       log.progress.push({ url: u.pathname + u.search, auth: headers.authorization });
       const list = opts.progress || [progressEnvelope({ slug: 'pick-one' })];
@@ -82,19 +84,20 @@ async function open(width, opts = {}) {
     }
     if (/^\/v1\/me\/vibecheck\/drafts\/[^/]+\/ask$/.test(u.pathname)) { log.draftAsks.push({ path: u.pathname, auth: headers.authorization }); return json(route, privateAsk.body, privateAsk.status); }
     if (u.pathname === '/v1/me/world-vibe/consent') {
-      if (!headers.authorization) return bare(route, 401);
+      if (!headers.authorization) return refuse(route, req.method() === 'PUT' ? 'consent_put_401' : 'consent_get_401');
       if (req.method() === 'PUT') { const b = JSON.parse(req.postData()); log.consentWrites.push({ body: b, headers }); consent = b.world_vibe_private; return json(route, consentBody(consent)); }
       log.consentReads.push({ headers });
       return json(route, consentBody(consent));
     }
     if (u.pathname === '/v1/me/world-vibe/phone') {
       log.phone.push(headers.authorization);
-      if (!headers.authorization) return bare(route, 401);
+      if (!headers.authorization) return refuse(route, 'phone_401');
       return json(route, phoneBody(opts.linked !== false));
     }
     if (u.pathname.startsWith('/v1/public/world-vibe/items/') && !u.pathname.endsWith('/progress')) {
       log.items.push({ path: u.pathname, auth: headers.authorization });
       const it = opts.item;
+      if (it === 404) return refuse(route, 'item_404');
       if (typeof it === 'number') return bare(route, it);
       return json(route, it || itemRow({ slug: decodeURIComponent(u.pathname.split('/').pop()) }));
     }

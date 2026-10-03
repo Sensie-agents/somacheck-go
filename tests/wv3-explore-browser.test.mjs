@@ -29,6 +29,7 @@ const url = 'http://127.0.0.1:' + server.address().port + '/world-vibe/explore/'
 // envelopes built from the captured contract fixtures.
 const fx = async (n) => JSON.parse(await readFile(path.join(root, 'world-vibe', 'explore', 'fixtures', n), 'utf8'));
 const REAL = { feed: await fx('wv3_explore_feed.json'), item: await fx('wv3_explore_item.json'), curators: await fx('wv3_explore_curators.json'), featured: await fx('wv3_explore_featured.json'), following: await fx('wv3_explore_following.json') };
+const FOLLOWING_401 = await fx('wv3_refusal_following_feed_401.json');
 const [A, B] = REAL.curators.map((c) => c.curator_id);
 const row = (o) => ({ ...REAL.feed, ...o });
 const FEED = [
@@ -62,6 +63,7 @@ async function open(width, height = 900, opts = {}) {
     if (u.includes('/world-vibe/curators')) return respond(route, { curators: REAL.curators });
     if (u.includes('/world-vibe/featured')) return respond(route, { featured: opts.noFeatured ? null : REAL.featured });
     if (u.includes('/following-feed')) headers.push(await route.request().allHeaders());
+    if (u.includes('/following-feed') && opts.followingStatus === 401) return respond(route, FOLLOWING_401.body, FOLLOWING_401.status);
     if (u.includes('/following-feed')) return respond(route, opts.followingStatus ? {} : { items: [REAL.following] }, opts.followingStatus || 200);
     return route.fulfill({ status: 404 });
   });

@@ -17,6 +17,7 @@ const slugs = (html) => [...html.matchAll(/data-slug="([^"]+)"/g)].map((m) => m[
 // Captured real responses (EXPLORE-API clone gate). Feed, item, featured and
 // following are single RPC rows; curators is the RPC row array.
 const REAL = { feed: fx('wv3_explore_feed.json'), item: fx('wv3_explore_item.json'), curators: fx('wv3_explore_curators.json'), featured: fx('wv3_explore_featured.json'), following: fx('wv3_explore_following.json') };
+const FOLLOWING_401 = fx('wv3_refusal_following_feed_401.json');
 const A = REAL.curators[0].curator_id;
 const B = REAL.curators[1].curator_id;
 // Variants are spreads of captured rows, never hand-typed shapes.
@@ -291,7 +292,7 @@ test('following without a token makes no request and reports signin', async () =
 
 test('following 401 reads as auth, 500 and network failure as unavailable', async () => {
   const tok = () => 't';
-  assert.deepEqual(await loadFollowing(fakeFetch({ '/following-feed': { status: 401, body: {} } }), 'x', tok), { items: [], error: 'auth' });
+  assert.deepEqual(await loadFollowing(fakeFetch({ '/following-feed': FOLLOWING_401 }), 'x', tok), { items: [], error: 'auth' });
   assert.deepEqual(await loadFollowing(fakeFetch({ '/following-feed': { status: 500, body: {} } }), 'x', tok), { items: [], error: 'unavailable' });
   assert.deepEqual(await loadFollowing(async () => { throw new TypeError('network'); }, 'x', tok), { items: [], error: 'unavailable' });
 });

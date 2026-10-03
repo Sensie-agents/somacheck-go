@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { extendExcludes, loadPick, loadProgress, sendToPhone, generateDrafts, askPrivate, getConsent, setConsent, loadPhoneLinked, loadItem, itemSlugFromSearch, shareUrlFor, MAX_EXCLUDES } from '../world-vibe/home/home-data.js';
-import { pickEnvelope, progressEnvelope, feedRow, consentBody, phoneBody, itemRow, pickSignedIn, pickAnon, createV3, sendOk, sendLinkRequired, draftsCreate, draftsConsentRequired, privateAsk, PENDING_PRIVATE_ASK } from './helpers/captured.mjs';
+import { pickEnvelope, progressEnvelope, feedRow, consentBody, phoneBody, itemRow, pickSignedIn, pickAnon, createV3, sendOk, sendLinkRequired, draftsCreate, draftsConsentRequired, privateAsk, pickEmpty, refusal } from './helpers/captured.mjs';
 
 const API = 'https://api.test';
 const res = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
@@ -71,7 +71,7 @@ test('pick: bearer only when signed in', async () => {
 });
 
 test('pick: { item: null } is an empty state, not an error; HTTP failure and network failure are errors', async () => {
-  assert.deepEqual(await loadPick(recorder(() => res(200, { ...pickSignedIn, item: null, reason: null })), API, {}), { pick: null, error: null });
+  assert.deepEqual(await loadPick(recorder(() => res(pickEmpty.status, pickEmpty.body)), API, {}), { pick: null, error: null });
   assert.deepEqual(await loadPick(recorder(() => res(500, {})), API, {}), { pick: null, error: 'unavailable' });
   assert.deepEqual(await loadPick(async () => { throw new TypeError('offline'); }, API, {}), { pick: null, error: 'unavailable' });
 });
@@ -134,9 +134,12 @@ test('send to phone: a replay (200) still returns the receipt', async () => {
 
 test('send to phone: every refusal maps to its own status', async () => {
   assert.deepEqual(await sendToPhone(recorder(() => res(sendLinkRequired.status, sendLinkRequired.body)), API, 'x', 't'), { status: 'link_required' });
-  // 422 is replayed from its capture above. 401/429/409/404 have no capture (PENDING CAPTURE, integration Round 7): status-only, no body.
-  const cases = [[401, 'signin'], [429, 'rate_limited'], [409, 'pending'], [404, 'error'], [500, 'error']];
-  for (const [code, status] of cases) assert.deepEqual(await sendToPhone(recorder(() => res(code, {})), API, 'x', 't'), { status }, String(code));
+  // 401, 429, 409 and 404 are replayed from their captures (status and body); 500 is transport and carries no body.
+  for (const [name, status] of [['ask_401', 'signin'], ['ask_429', 'rate_limited'], ['ask_409', 'pending'], ['ask_404', 'error']]) {
+    const c = refusal(name);
+    assert.deepEqual(await sendToPhone(recorder(() => res(c.status, c.body)), API, 'x', 't'), { status }, name);
+  }
+  assert.deepEqual(await sendToPhone(recorder(() => res(500, {})), API, 'x', 't'), { status: 'error' }, '500');
   assert.deepEqual(await sendToPhone(async () => { throw new TypeError('offline'); }, API, 'x', 't'), { status: 'error' });
 });
 
@@ -164,10 +167,10 @@ test('drafts: returns the drafts; 403 is consent_required; 422 differs by source
   const d = draftsCreate.body.drafts;
   assert.deepEqual(await generateDrafts(recorder(() => res(draftsCreate.status, draftsCreate.body)), API, { source: 'agent' }, 't'), { drafts: d });
   assert.deepEqual(await generateDrafts(recorder(() => res(draftsConsentRequired.status, draftsConsentRequired.body)), API, { source: 'agent' }, 't'), { error: 'consent_required' });
-  assert.deepEqual(await generateDrafts(recorder(() => res(401, {})), API, { source: 'agent' }, 't'), { error: 'signin' });
-  // drafts 422 (no_context / invalid_words): PENDING CAPTURE (integration Round 7), status-only.
-  assert.deepEqual(await generateDrafts(recorder(() => res(422, {})), API, { source: 'agent' }, 't'), { error: 'no_context' });
-  assert.deepEqual(await generateDrafts(recorder(() => res(422, {})), API, { source: 'words', words: 'x' }, 't'), { error: 'invalid_words' });
+  const d401 = refusal('drafts_401'), noCtx = refusal('drafts_422_no_context'), badWords = refusal('drafts_422_invalid_words');
+  assert.deepEqual(await generateDrafts(recorder(() => res(d401.status, d401.body)), API, { source: 'agent' }, 't'), { error: 'signin' });
+  assert.deepEqual(await generateDrafts(recorder(() => res(noCtx.status, noCtx.body)), API, { source: 'agent' }, 't'), { error: 'no_context' });
+  assert.deepEqual(await generateDrafts(recorder(() => res(badWords.status, badWords.body)), API, { source: 'words', words: 'x' }, 't'), { error: 'invalid_words' });
   assert.deepEqual(await generateDrafts(recorder(() => res(200, { ...draftsCreate.body, drafts: [] })), API, { source: 'agent' }, 't'), { error: 'unavailable' });
   assert.deepEqual(await generateDrafts(recorder(() => res(502, {})), API, { source: 'agent' }, 't'), { error: 'unavailable' });
 });
@@ -181,15 +184,18 @@ test('private ask: POSTs the draft id with the bearer; nothing is sent signed ou
   const g = recorder(() => res(privateAsk.status, privateAsk.body));
   assert.deepEqual(await askPrivate(g, API, UUID, null), { status: 'signin' });
   assert.equal(g.calls.length, 0);
-  assert.deepEqual(await askPrivate(recorder(() => res(409, {})), API, UUID, 't'), { status: 'error' });
+  for (const name of ['private_ask_409', 'private_ask_404']) {
+    const c = refusal(name);
+    assert.deepEqual(await askPrivate(recorder(() => res(c.status, c.body)), API, UUID, 't'), { status: 'error' }, name);
+  }
+  const u = refusal('private_ask_401');
+  assert.deepEqual(await askPrivate(recorder(() => res(u.status, u.body)), API, UUID, 't'), { status: 'signin' });
 });
 
-// pending capture: the private ask has no dedicated capture yet (integration Round 7).
-// The orchestrator sets WV3_REQUIRE_PRIVATE_ASK=1 once wv3_private_ask.json lands; until
-// then the replay above uses the route's three fields and this test is the marker.
-test('private ask replay uses a dedicated capture (pending capture)', (t) => {
-  if (process.env.WV3_REQUIRE_PRIVATE_ASK === '1') assert.equal(PENDING_PRIVATE_ASK, false, 'wv3_private_ask.json is absent: the private-ask contract is not captured');
-  else if (PENDING_PRIVATE_ASK) t.diagnostic('pending capture: wv3_private_ask.json');
+// The private ask 201 is a capture, so the replay above is the contract and this is permanent.
+test('private ask replay uses its dedicated capture', () => {
+  assert.equal(privateAsk.status, 201);
+  assert.deepEqual(Object.keys(privateAsk.body).sort(), ['request_id', 'source', 'status']);
 });
 
 // A stateful stand-in for the consent route: the flag is per bearer and nobody else's is readable.
@@ -198,7 +204,7 @@ function consentRoute() {
   return recorder(async (u, init) => {
     assert.equal(u.pathname, '/v1/me/world-vibe/consent');
     const who = (init.headers || {}).Authorization;
-    if (!who) return res(401, {});
+    if (!who) { const c = refusal('consent_get_401'); return res(c.status, c.body); }
     if (init.method === 'PUT') { flags.set(who, JSON.parse(init.body).world_vibe_private === true); return res(200, consentBody(flags.get(who))); }
     return res(200, consentBody(flags.get(who) === true));
   });
@@ -237,8 +243,9 @@ test('consent: signed out makes no request; 401 and failures are reported; a bod
   assert.deepEqual(await getConsent(f, API, null), { consent: null, error: 'signin' });
   assert.deepEqual(await setConsent(f, API, null, true), { consent: null, error: 'signin' });
   assert.equal(f.calls.length, 0);
-  assert.equal((await getConsent(recorder(() => res(401, {})), API, 'tok')).error, 'signin');
-  assert.equal((await setConsent(recorder(() => res(401, {})), API, 'tok', true)).error, 'signin');
+  const cg = refusal('consent_get_401'), cp = refusal('consent_put_401');
+  assert.equal((await getConsent(recorder(() => res(cg.status, cg.body)), API, 'tok')).error, 'signin');
+  assert.equal((await setConsent(recorder(() => res(cp.status, cp.body)), API, 'tok', true)).error, 'signin');
   assert.equal((await setConsent(recorder(() => res(500, {})), API, 'tok', true)).error, 'unavailable');
   assert.equal((await getConsent(async () => { throw new TypeError('offline'); }, API, 'tok')).error, 'unavailable');
   assert.deepEqual(await getConsent(recorder(() => res(200, {})), API, 'tok'), { consent: null, error: 'unavailable' });
@@ -252,7 +259,8 @@ test('phone link: linked only when the route says linked === true; every other a
   assert.equal(auth(f.calls[0]), 'Bearer tok');
   assert.equal(await loadPhoneLinked(recorder(() => res(200, phoneBody(false))), API, 'tok'), false);
   assert.equal(await loadPhoneLinked(recorder(() => res(200, { ...phoneBody(true), linked: 'true' })), API, 'tok'), false);
-  assert.equal(await loadPhoneLinked(recorder(() => res(401, {})), API, 'tok'), false);
+  const p401 = refusal('phone_401');
+  assert.equal(await loadPhoneLinked(recorder(() => res(p401.status, p401.body)), API, 'tok'), false);
   assert.equal(await loadPhoneLinked(recorder(() => res(500, {})), API, 'tok'), false);
   assert.equal(await loadPhoneLinked(async () => { throw new TypeError('offline'); }, API, 'tok'), false);
   const g = recorder(() => res(200, phoneBody(true)));
@@ -266,7 +274,8 @@ test('item route: loads the captured item by slug; unknown, malformed or mismatc
   assert.deepEqual(await loadItem(f, API, body.slug), { item: body, error: null });
   assert.equal(f.calls[0].url, API + '/v1/public/world-vibe/items/' + body.slug);
   assert.equal((f.calls[0].init.headers || {}).Authorization, undefined);
-  assert.deepEqual(await loadItem(recorder(() => res(404, {})), API, 'gone-item'), { item: null, error: 'not_found' });
+  const i404 = refusal('item_404');
+  assert.deepEqual(await loadItem(recorder(() => res(i404.status, i404.body)), API, 'gone-item'), { item: null, error: 'not_found' });
   assert.deepEqual(await loadItem(recorder(() => res(500, {})), API, 'x-1'), { item: null, error: 'unavailable' });
   assert.deepEqual(await loadItem(recorder(() => res(200, body)), API, 'other-slug'), { item: null, error: 'unavailable' });
   for (const bad of [null, '', 'Not A Slug', '../x', 'x'.repeat(101)]) {

@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createFlow } from '../world-vibe/home/home-flow.js';
-import { pickAnon, pickEnvelope, progressEnvelope, consentBody, phoneBody, sendOk, sendLinkRequired, draftsCreate, draftsConsentRequired, privateAsk } from './helpers/captured.mjs';
+import { pickAnon, pickEnvelope, progressEnvelope, consentBody, phoneBody, sendOk, sendLinkRequired, draftsCreate, draftsConsentRequired, privateAsk, refusal } from './helpers/captured.mjs';
 
 const API = 'https://api.test';
 const RECEIPT = sendOk.body.request_id;
@@ -38,6 +38,7 @@ function harness({ routes = {}, signedIn = true } = {}) {
 }
 const flush = () => new Promise((r) => setTimeout(r, 0));
 const PICK = pickEnvelope('following', { slug: 'pick-one', statement: 'I trust my gut over my dashboard.' });
+const REFUSAL_CP = refusal('consent_put_401');
 const base = { 'GET /v1/public/world-vibe/pick': res(200, PICK) };
 
 test('signed out: the anonymous pick capture is shown and nothing personal is requested', async () => {
@@ -283,7 +284,7 @@ test('consent: a failed PUT (500) is shown even though a newer GET resolved firs
 });
 
 test('consent: a 401 on the PUT signs out even though a newer GET resolved first', async () => {
-  const h = harness({ routes: { ...base, [CONSENT_GET]: res(200, consentBody(true)), [CONSENT_PUT]: { hold: res(401, {}) } } });
+  const h = harness({ routes: { ...base, [CONSENT_GET]: res(200, consentBody(true)), [CONSENT_PUT]: { hold: res(REFUSAL_CP.status, REFUSAL_CP.body) } } });
   const writing = h.flow.toggleConsent(false); await flush();
   h.flow.selectLane('private'); await flush();
   assert.equal(h.st.consent, true);
@@ -329,7 +330,7 @@ test('consent write: a 401 on an older write still signs out after a newer write
   const b = h.flow.toggleConsent(false); await flush();
   gates[1](res(200, consentBody(false))); await flush();
   assert.equal(h.st.consent, false);
-  gates[0](res(401, {})); await flush();
+  gates[0](res(REFUSAL_CP.status, REFUSAL_CP.body)); await flush();
   await Promise.all([a, b]);
   assert.equal(h.st.consent, null, 'the expired sign-in cleared personal state');
 });
