@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fixturesDir } from './helpers/captured.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || '/opt/homebrew/lib/node_modules/playwright');
@@ -14,7 +15,11 @@ const fallbackPath = path.join(root, '404.html');
 const sourcePath = path.join(root, 's', 'index.html');
 const qrLibraryPath = path.join(root, 'world-vibe', 'qrcode.min.js');
 const token = 'wvsmart-functional-gate';
-const statement = 'I trust my gut more than my dashboard';
+// The resolver's responses are captured (wv3_resolver_200, wv3_refusal_resolver_404) and replayed unchanged.
+const capture = async (name) => JSON.parse(await readFile(path.join(fixturesDir, name), 'utf8'));
+const resolverOk = await capture('wv3_resolver_200.json');
+const resolverMissing = await capture('wv3_refusal_resolver_404.json');
+const statement = resolverOk.body.text;
 const expectedUniversalLink = `https://go.somacheck.com/s/${token}`;
 const expectedAppLink = `somacheck://s/${token}`;
 // App Store id6792978184 remains the post-publication cutover target.
@@ -36,19 +41,14 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url, 'http://127.0.0.1');
 
   if (url.pathname === `/api/s/${token}` && url.searchParams.get('format') === 'json') {
-    // PENDING CAPTURE: the resolver's 200 body has no captured fixture yet; the page needs text and status.
-    response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(JSON.stringify({
-      text: statement,
-      status: 'pending'
-    }));
+    response.writeHead(resolverOk.status, { 'content-type': 'application/json' });
+    response.end(JSON.stringify(resolverOk.body));
     return;
   }
 
   if (url.pathname.startsWith('/api/s/')) {
-    // Status only: no capture of the resolver's refusal exists, so no body is invented.
-    response.writeHead(404);
-    response.end();
+    response.writeHead(resolverMissing.status, { 'content-type': 'application/json' });
+    response.end(JSON.stringify(resolverMissing.body));
     return;
   }
 

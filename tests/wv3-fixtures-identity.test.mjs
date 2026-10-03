@@ -1,6 +1,6 @@
 // The contract fixtures are captured, never written by hand. Each file here is a
 // byte copy of the backend worktrees' statement-api/fixtures/ (integration
-// b68279fa, 59515bad and 4e35e548 for the private ask, empty pick and refusals; wv3_consent.json from
+// b68279fa, 59515bad, 4e35e548, bca0b9ae and 3fcd7fe0 for the private ask, empty pick, refusals and resolver; wv3_consent.json from
 // consent-api-sol2 91580176). The
 // hashes pin the bytes, and the backend worktrees are compared directly when
 // they exist, so a hand edit fails either way.
@@ -54,6 +54,8 @@ const SHA256 = {
   'wv3_refusal_private_ask_404.json': '7f977ef0cc2248d37fd9f590e8eb13aa54706fc541012da69375c8db0f66063c',
   'wv3_refusal_private_ask_409.json': '2efa47018aaefb20842bad38c6e2648a213f3f60466c861b635ef5453f7e6d47',
   'wv3_pick_empty.json': 'e3ed4c1ee3e56ef1e547eca513ea401e17206e314072567ebef323110a1a3377',
+  'wv3_resolver_200.json': '4b6b48aeea322012385997aadf08814f1785c39a5c9cfbc8cfb4a20a1fd030e0',
+  'wv3_refusal_resolver_404.json': '854fcdfe26e102ca9c5f32e2b83013410779f1954e338cf644e9f9b54d2ee406',
   'wv3_private_ask.json': '39b2bc4b3831311ccac3f839783c329ffdaee5839a4e75abc348b8c56d992459'
 };
 
@@ -69,7 +71,7 @@ const BACKEND = (wt) => path.resolve(fixturesDir, '..', '..', '..', '..', wt, 's
 const SOURCE = (name) => (/^wv3_refusal_|^wv3_private_ask|^wv3_pick_empty/.test(name) ? 'wv3-integration' : name === 'wv3_consent.json' ? 'wv3-consent-sol2' : /phone/.test(name) ? 'wv3-backend-sol2' : 'wv3-integration');
 
 test('each home, consent and refusal capture is byte-identical to its backend worktree when present', () => {
-  for (const name of Object.keys(SHA256).filter((n) => /pick|progress|send|drafts|create_v3|consent|phone|private_ask|refusal/.test(n))) {
+  for (const name of Object.keys(SHA256).filter((n) => /pick|progress|send|drafts|create_v3|consent|phone|private_ask|refusal|resolver/.test(n))) {
     let theirs;
     try { theirs = readFileSync(path.join(BACKEND(SOURCE(name)), name)); } catch { continue; }
     assert.ok(readFileSync(path.join(fixturesDir, name)).equals(theirs), name);
