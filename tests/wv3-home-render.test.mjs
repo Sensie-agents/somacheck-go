@@ -251,6 +251,18 @@ test('sign-in sheet has a labelled email field and a status region', () => {
   assert.match(html, /role="status"[^>]*>Check your email/);
 });
 
+test('sign-in sheet, once the email is sent, asks for the six-digit code and keeps the link as the other way in', () => {
+  const html = renderSignInSheet('sent', { email: 'a&b@x.test' });
+  assert.doesNotMatch(html, /id="si-email"/);
+  assert.match(html, /<form id="code-form"/);
+  assert.match(html, /<input type="hidden" name="email" value="a&amp;b@x.test">/);
+  assert.match(html, /<label for="si-code">Six-digit code<\/label>/);
+  assert.match(html, /id="si-code"[^>]*inputmode="numeric"/);
+  assert.match(html, /id="si-code"[^>]*autocomplete="one-time-code"/);
+  assert.match(html, /role="status"[^>]*>Check your email\. Click the sign-in link on this device, or enter the six-digit code here\./);
+  assert.match(renderSignInSheet('bad_code', { email: 'a@x.test' }), /role="status"[^>]*>That code didn&#39;t work|role="status"[^>]*>That code didn't work/);
+});
+
 test('empty state: nothing left offers Start over, a failed load offers Try again', () => {
   assert.match(renderEmpty(false), /Start over/);
   assert.match(renderEmpty(true), /Try again/);

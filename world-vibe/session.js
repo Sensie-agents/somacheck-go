@@ -66,6 +66,30 @@ export function createSession({ fetch: fetchFn, storage, supabaseUrl = DEFAULT_S
       } catch { return { error: 'unavailable' }; }
     },
 
+    // Signs in with the six-digit code from the same email, for a person who
+    // reads the email on another device or ignores the link. Resolves { ok }
+    // or { error }. The code is only ever sent to GoTrue's verify endpoint with
+    // the publishable key; a success writes the same session the link would.
+    async verifyCode(email, code) {
+      if (!api.configured()) return { error: 'not_configured' };
+      const e = typeof email === 'string' ? email.trim() : '';
+      const c = typeof code === 'string' ? code.replace(/\s+/g, '') : '';
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return { error: 'invalid_email' };
+      if (!/^\d{6}$/.test(c)) return { error: 'invalid_code' };
+      const started = epochNow();
+      try {
+        const r = await fetchFn(supabaseUrl + '/auth/v1/verify', {
+          method: 'POST', headers: headers(), body: JSON.stringify({ type: 'email', email: e, token: c })
+        });
+        if (!r.ok) return { error: r.status === 429 ? 'rate_limited' : 'bad_code' };
+        const t = await r.json();
+        if (started !== epochNow()) return { error: 'signed_out' };
+        storage.removeItem(VERIFIER_KEY);
+        write({ access_token: t.access_token, refresh_token: t.refresh_token, expires_at: t.expires_at || Math.floor(now() / 1000) + (t.expires_in || 3600), user_id: t.user && t.user.id, email: t.user && t.user.email });
+        return { ok: true };
+      } catch { return { error: 'unavailable' }; }
+    },
+
     // Called by /auth/callback/ for a web-initiated link: trades the PKCE code
     // for a session. Resolves { ok, next } or { error }.
     async completeSignIn(search) {

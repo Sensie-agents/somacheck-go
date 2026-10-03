@@ -55,7 +55,7 @@ const check = async (name, fn) => {
 async function open(width, opts = {}) {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
-  const log = { api: [], sb: [], pickUrls: [], asks: [], drafts: [], draftAsks: [], progress: [], consentWrites: [], phone: [], items: [], otp: [], logout: [], exchange: [] };
+  const log = { api: [], sb: [], pickUrls: [], asks: [], drafts: [], draftAsks: [], progress: [], consentWrites: [], phone: [], items: [], otp: [], logout: [], exchange: [], verify: [] };
   let consent = opts.consent === true;
   log.consentReads = [];
   let progressCalls = 0;
@@ -115,6 +115,12 @@ async function open(width, opts = {}) {
     if (u.pathname === '/auth/v1/otp') { log.otp.push({ body: JSON.parse(req.postData()), url: u.search, headers }); return json(route, {}); }
     if (u.pathname === '/auth/v1/token') { log.exchange.push(JSON.parse(req.postData())); return json(route, { access_token: 'tok-new', refresh_token: 'r-new', expires_in: 3600, user: { id: 'u-1', email: 'me@x.test' } }); }
     if (u.pathname === '/auth/v1/logout') { log.logout.push(headers.authorization); return json(route, {}); }
+    if (u.pathname === '/auth/v1/verify') {
+      const body = JSON.parse(req.postData());
+      log.verify.push({ body, headers });
+      if (body.token !== '123456') return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'invalid_grant' }) });
+      return json(route, { access_token: 'tok-code', refresh_token: 'r-code', expires_in: 3600, user: { id: 'u-1', email: 'me@x.test' } });
+    }
     return route.fulfill({ status: 404 });
   });
   if (opts.key === '') await page.route(ORIGIN + '/world-vibe/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: "window.SOMACHECK_INSTALL_URL = 'https://testflight.apple.com/join/x';" }));
@@ -422,6 +428,31 @@ await check('sign in: the magic link request carries the publishable key and no 
   assert.equal(log.otp[0].headers.apikey, KEY);
   assert.equal(log.otp[0].headers.authorization, undefined);
   assert.equal(new URLSearchParams(log.otp[0].url).get('redirect_to'), ORIGIN + '/auth/callback/?web=1&next=%2Fworld-vibe%2F');
+  await page.close();
+});
+
+await check('sign in with the emailed code: the sheet swaps to the code field, a wrong code is refused, the right one signs in with the publishable key only', async () => {
+  const { page, log } = await open(420);
+  await page.locator('#account [data-open="signin"]').click();
+  await page.locator('#si-email').fill('me@x.test');
+  await page.locator('#signin-form button').click();
+  await page.waitForSelector('#code-form');
+  assert.equal(await page.locator('#si-email').count(), 0);
+  assert.match(await page.locator('#si-status').textContent(), /enter the six-digit code here/);
+  await page.locator('#si-code').fill('000000');
+  await page.locator('#code-form button').click();
+  await page.waitForFunction(() => document.getElementById('si-status').textContent.includes("didn't work"));
+  assert.equal(await page.evaluate(() => localStorage.getItem('wv.session')), null, 'a refused code leaves the person signed out');
+  await page.locator('#si-code').fill('123456');
+  await page.locator('#code-form button').click();
+  await page.waitForFunction(() => document.querySelector('#account .who'));
+  assert.match(await page.locator('#account .who').textContent(), /me@x\.test/);
+  assert.equal(await page.evaluate(() => document.getElementById('scrim').hidden), true, 'the sheet closes once signed in');
+  assert.equal(log.verify.length, 2);
+  assert.deepEqual(log.verify[1].body, { type: 'email', email: 'me@x.test', token: '123456' });
+  assert.equal(log.verify[1].headers.apikey, KEY);
+  assert.equal(log.verify[1].headers.authorization, undefined);
+  assert.equal(log.exchange.length, 0, 'the code path never touches the PKCE exchange');
   await page.close();
 });
 

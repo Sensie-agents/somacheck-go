@@ -232,12 +232,25 @@ export function renderAccountBar({ configured, email }) {
 }
 
 export const SIGNIN_STATUS = {
-  sent: 'Check your email for the sign-in link. You can close this tab.',
+  sent: 'Check your email. Click the sign-in link on this device, or enter the six-digit code here.',
   invalid_email: 'Enter a valid email address.',
+  invalid_code: 'Enter the six-digit code from the email.',
+  bad_code: "That code didn't work. Check it, or send yourself a new one.",
+  signed_out: 'Sign in again.',
   rate_limited: 'Too many tries. Wait a minute and try again.',
   unavailable: "Couldn't send the link. Try again in a moment."
 };
-export function renderSignInSheet(status) {
+// Two stages. Before the email is sent: the email field. After it ("sent" with
+// the address): the six-digit code field, so a person who reads the email on
+// another device, or does not click the link, can still finish here.
+export function renderSignInSheet(status, { email = '' } = {}) {
+  if (email) {
+    return '<p class="fine" id="si-status" role="status">' + esc(SIGNIN_STATUS[status] || SIGNIN_STATUS.sent) + '</p>' +
+      '<form id="code-form" novalidate><input type="hidden" name="email" value="' + esc(email) + '">' +
+      '<div class="field"><label for="si-code">Six-digit code</label><input id="si-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="6" required></div>' +
+      '<button class="btn-main" type="submit">Sign in with the code</button></form>' +
+      '<p class="fine">Sent to ' + esc(email) + '. No password. Signing in lets you send lines to your phone and see your own readings.</p>';
+  }
   return '<form id="signin-form" novalidate><div class="field"><label for="si-email">Email</label><input id="si-email" name="email" type="email" autocomplete="email" required></div>' +
     '<button class="btn-main" type="submit">Email me a sign-in link</button></form>' +
     '<p class="fine" id="si-status" role="status">' + esc(SIGNIN_STATUS[status] || '') + '</p>' +

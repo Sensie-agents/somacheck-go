@@ -14,6 +14,8 @@ const slot = document.getElementById('slot');
 const scrim = document.getElementById('scrim');
 const sheet = document.getElementById('sheet');
 let lastFocus = null;
+// Email the sign-in sheet has already sent a code and link to; null = ask for one.
+let signinEmail = null;
 
 const token = () => session.getAccessToken();
 
@@ -75,7 +77,7 @@ function checkContext() {
 function sheetHtml(kind) {
   if (kind === 'check') return head('Check in on') + renderCheckSheet(checkContext());
   if (kind === 'bring') return head('Bring your own line') + renderBringSheet();
-  if (kind === 'signin') return head('Sign in') + renderSignInSheet();
+  if (kind === 'signin') return head('Sign in') + renderSignInSheet(signinEmail ? 'sent' : undefined, { email: signinEmail || '' });
   const S = [
     ['Capture', 'Highlight any line on the web and write your take in one sentence.', 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4'],
     ['Check in', 'Hold your phone for the 3-second gesture. Your body answers, not your thumbs.', 'M7 2.5h10v19H7zM11 18.5h2'],
@@ -106,6 +108,7 @@ function refreshCheckSheet() {
 function closeSheet() {
   scrim.hidden = true;
   st.sheet = null;
+  signinEmail = null;
   if (lastFocus && document.body.contains(lastFocus)) lastFocus.focus();
 }
 
@@ -137,11 +140,29 @@ document.addEventListener('change', (e) => {
 });
 
 document.addEventListener('submit', async (e) => {
-  if (e.target.id !== 'signin-form') return;
+  if (e.target.id === 'signin-form') {
+    e.preventDefault();
+    const email = String(new FormData(e.target).get('email') || '').trim();
+    const r = await session.signIn(email);
+    if (r.ok && st.sheet === 'signin') {
+      // The code and the link are on their way: swap to the code field.
+      signinEmail = email;
+      sheet.innerHTML = sheetHtml('signin');
+      const c = document.getElementById('si-code');
+      if (c) c.focus();
+      return;
+    }
+    const status = document.getElementById('si-status');
+    if (status) status.textContent = SIGNIN_STATUS[r.ok ? 'sent' : r.error] || SIGNIN_STATUS.unavailable;
+    return;
+  }
+  if (e.target.id !== 'code-form') return;
   e.preventDefault();
+  const fd = new FormData(e.target);
+  const r = await session.verifyCode(String(fd.get('email') || ''), String(fd.get('code') || ''));
+  if (r.ok) { if (st.sheet === 'signin') closeSheet(); return; }
   const status = document.getElementById('si-status');
-  const r = await session.signIn(new FormData(e.target).get('email'));
-  status.textContent = SIGNIN_STATUS[r.ok ? 'sent' : r.error] || SIGNIN_STATUS.unavailable;
+  if (status) status.textContent = SIGNIN_STATUS[r.error] || SIGNIN_STATUS.unavailable;
 });
 
 // Keep Tab inside the open sheet; Escape closes it.

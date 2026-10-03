@@ -16,7 +16,7 @@ function memory() {
   return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), m };
 }
 // A GoTrue stand-in that records every request. Responses are the shapes GoTrue documents.
-function gotrue({ otp = 200, token = 200, refresh = 200, logout = 204 } = {}) {
+function gotrue({ otp = 200, token = 200, refresh = 200, logout = 204, verify = 200 } = {}) {
   const calls = [];
   const f = async (url, init = {}) => {
     calls.push({ url: String(url), init, body: init.body ? JSON.parse(init.body) : null });
@@ -26,6 +26,7 @@ function gotrue({ otp = 200, token = 200, refresh = 200, logout = 204 } = {}) {
     if (u.pathname === '/auth/v1/token' && u.searchParams.get('grant_type') === 'pkce') return json(token, { access_token: 'access-1', refresh_token: 'refresh-1', expires_in: 3600, user: { id: 'u-1', email: 'me@x.test' } });
     if (u.pathname === '/auth/v1/token' && u.searchParams.get('grant_type') === 'refresh_token') return json(refresh, { access_token: 'access-2', refresh_token: 'refresh-2', expires_in: 3600 });
     if (u.pathname === '/auth/v1/logout') return json(logout, {});
+    if (u.pathname === '/auth/v1/verify') return json(verify, { access_token: 'access-c', refresh_token: 'refresh-c', expires_in: 3600, user: { id: 'u-1', email: 'me@x.test' } });
     return json(404, {});
   };
   f.calls = calls;
@@ -347,4 +348,55 @@ test('notify() tells listeners the shared storage changed (the window storage ev
   s.onChange(() => { n++; });
   s.notify();
   assert.equal(n, 1);
+});
+
+test('verifyCode: the six-digit code goes to GoTrue verify with the publishable key only, and signs the person in', async () => {
+  const { s, fetch, storage } = make();
+  await s.signIn('me@x.test');
+  const r = await s.verifyCode(' me@x.test ', '123 456');
+  assert.deepEqual(r, { ok: true });
+  const v = fetch.calls.find((c) => c.url.includes('/auth/v1/verify'));
+  assert.ok(v, 'verify was called');
+  assert.equal(v.init.method, 'POST');
+  assert.deepEqual(v.body, { type: 'email', email: 'me@x.test', token: '123456' });
+  assert.equal(v.init.headers.apikey, KEY);
+  assert.equal(v.init.headers.authorization, undefined);
+  assert.equal(s.getAccessToken(), 'access-c');
+  assert.equal(s.email(), 'me@x.test');
+  assert.equal(storage.getItem('wv.pkce'), null, 'the pending link verifier is dropped once the code signed the person in');
+});
+
+test('verifyCode refuses a malformed code or email without any request', async () => {
+  const { s, fetch } = make();
+  assert.deepEqual(await s.verifyCode('me@x.test', '12345'), { error: 'invalid_code' });
+  assert.deepEqual(await s.verifyCode('me@x.test', 'abcdef'), { error: 'invalid_code' });
+  assert.deepEqual(await s.verifyCode('not-an-email', '123456'), { error: 'invalid_email' });
+  assert.equal(fetch.calls.length, 0);
+  assert.equal(s.getAccessToken(), null);
+  const b = make({ publishableKey: '' });
+  assert.deepEqual(await b.s.verifyCode('me@x.test', '123456'), { error: 'not_configured' });
+});
+
+test('verifyCode maps a rejected code, 429 and failures to honest errors and stays signed out', async () => {
+  const a = make({ fetch: gotrue({ verify: 403 }) });
+  assert.deepEqual(await a.s.verifyCode('me@x.test', '123456'), { error: 'bad_code' });
+  assert.equal(a.s.getAccessToken(), null);
+  assert.deepEqual(await make({ fetch: gotrue({ verify: 429 }) }).s.verifyCode('me@x.test', '123456'), { error: 'rate_limited' });
+  assert.deepEqual(await make({ fetch: async () => { throw new TypeError('offline'); } }).s.verifyCode('me@x.test', '123456'), { error: 'unavailable' });
+});
+
+test('a sign-out that lands while the code is being verified wins: no session is written back', async () => {
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  const base = gotrue();
+  const fetch = async (url, init) => {
+    if (String(url).includes('/auth/v1/verify')) { await gate; }
+    return base(url, init);
+  };
+  const { s } = make({ fetch });
+  const pending = s.verifyCode('me@x.test', '123456');
+  await s.signOut();
+  release();
+  assert.deepEqual(await pending, { error: 'signed_out' });
+  assert.equal(s.getAccessToken(), null);
 });
