@@ -199,6 +199,9 @@ test('check sheet signed out: QR with the share URL, no Send to my phone, sign-i
 
 test('check sheet signed in with a link: Send to my phone plus the QR', () => {
   const html = renderCheckSheet({ ...shared, signedIn: true, phoneLinked: true });
+  const pending = renderCheckSheet({ ...shared, signedIn: true, phoneLinked: true, pending: true });
+  assert.equal(pending.includes('data-act="send"'), false, 'no Send button while a send is on its way');
+  assert.match(text(pending), /Sending to your phone\./);
   assert.match(html, /data-act="send"/);
   assert.ok(html.includes('data-qr="' + SHARE + '"'));
   assert.doesNotMatch(html, /data-open="signin"/);

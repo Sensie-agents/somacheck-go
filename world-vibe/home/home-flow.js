@@ -12,11 +12,12 @@ export const POLL_MAX = 40;
 export function createFlow({ api, fetchFn, getToken, tz = 'UTC', arrivedFrom = null, ui, setTimer = setTimeout, clearTimer = clearTimeout }) {
   const st = {
     lane: 'shared', phase: 'card', pick: null, pickError: false, excludes: [], arrivedFrom,
-    progress: null, mode: 'reveal', receipt: null, phoneLinked: null, linkRequired: false, sent: false, sendError: null,
+    progress: null, mode: 'reveal', receipt: null, phoneLinked: null, linkRequired: false, sent: false, sending: null, sendError: null,
     pctx: 'agent', drafts: [], didx: 0, generated: false, consent: null, perror: null, sheet: null
   };
   let gen = 0;
   let pickSeq = 0;
+  let linkSeq = 0;
   // Consent is last-write-wins by WRITE sequence. A read applies only if no write
   // started after it did and it is the newest read; a write's outcome (value,
   // error, or sign-out) always lands unless a newer write superseded it.
@@ -25,7 +26,10 @@ export function createFlow({ api, fetchFn, getToken, tz = 'UTC', arrivedFrom = n
   let pollTimer = null;
 
   const currentLine = () => (st.drafts.length ? st.drafts[st.didx % st.drafts.length] : null);
-  const scopeKey = () => st.lane + ':' + (st.lane === 'private' ? (currentLine() || {}).id : st.pick && st.pick.slug);
+  // A shared line is scoped by the pick that showed it too: coming back to the
+  // same line after moving on is a new scope, so a response or a send from the
+  // earlier visit never applies to the later one.
+  const scopeKey = () => st.lane + ':' + (st.lane === 'private' ? (currentLine() || {}).id : pickSeq + ':' + (st.pick && st.pick.slug));
   // Returns a check that is false once the person signed out, switched lane, or
   // moved to another line, so a late response is dropped instead of shown.
   const scoped = () => {
@@ -33,6 +37,10 @@ export function createFlow({ api, fetchFn, getToken, tz = 'UTC', arrivedFrom = n
     return () => g === gen && k === scopeKey();
   };
   const signedGen = () => { const g = gen; return () => g === gen; };
+  // Names a send by the sign-in generation and the line it is for, so a send
+  // still in flight from before a sign-out or a card change neither blocks a
+  // new one nor clears its guard when its late response lands.
+  const sendKey = () => gen + ':' + scopeKey();
 
   function stopPoll() { clearTimer(pollTimer); pollTimer = null; }
 
@@ -41,12 +49,19 @@ export function createFlow({ api, fetchFn, getToken, tz = 'UTC', arrivedFrom = n
     const still = signedGen();
     const r = await loadPick(fetchFn, api, { exclude: st.excludes, tz, arrivedFrom: st.arrivedFrom, token: getToken() });
     if (seq !== pickSeq || !still()) return;
+    // A check sheet opened while this pick was loading shows the line that
+    // is about to be replaced: it closes, so nothing can be asked for a line
+    // that is no longer the one on the card. Its focus target goes with the
+    // old card, so focus moves to the new one.
+    const closed = st.sheet === 'check';
+    ui.closeCheck();
     st.arrivedFrom = null;
     st.pick = r.pick;
     st.pickError = Boolean(r.error);
     st.phase = 'card';
-    st.sent = false; st.sendError = null; st.receipt = null;
+    st.sent = false; st.sending = null; st.sendError = null; st.receipt = null;
     ui.render();
+    if (closed) ui.focusCard();
   }
 
   function selectLane(lane) {
@@ -59,13 +74,16 @@ export function createFlow({ api, fetchFn, getToken, tz = 'UTC', arrivedFrom = n
   function retry() { if (!st.pickError) st.excludes = []; return showPick(); }
 
   // Opening the check sheet learns whether "Send to my phone" may be offered.
+  // Only the newest lookup's answer counts: an older one, say from a sheet
+  // that was closed meanwhile, landing late must not overwrite it.
   async function openCheck() {
     st.sent = false; st.sendError = null;
     ui.openCheck();
     if (getToken() && st.phoneLinked === null) {
       const still = signedGen();
+      const seq = ++linkSeq;
       const linked = await loadPhoneLinked(fetchFn, api, getToken());
-      if (!still()) return;
+      if (!still() || seq !== linkSeq) return;
       st.phoneLinked = linked;
       ui.refreshCheck();
     }
@@ -107,9 +125,16 @@ export function createFlow({ api, fetchFn, getToken, tz = 'UTC', arrivedFrom = n
     pollTimer = setTimer(tick, POLL_MS);
   }
 
-  async function sendShared() {
+  // `token` lets a caller that validated a session snapshot send with exactly
+  // that one. One send at a time for a line, and none after one succeeded: the
+  // automatic send and the button share this guard.
+  async function sendShared({ token = getToken() } = {}) {
+    const mine = sendKey();
+    if (st.sending === mine || st.sent) return;
+    st.sending = mine;
     const still = scoped();
-    const r = await sendToPhone(fetchFn, api, st.pick.slug, getToken());
+    let r;
+    try { r = await sendToPhone(fetchFn, api, st.pick.slug, token); } finally { if (st.sending === mine) st.sending = null; }
     if (!still()) return;
     st.sendError = null;
     if (r.status === 'sent') { st.sent = true; st.receipt = r.requestId; startPoll(); }
@@ -181,10 +206,13 @@ export function createFlow({ api, fetchFn, getToken, tz = 'UTC', arrivedFrom = n
     stopPoll();
     st.progress = null; st.mode = 'reveal'; st.phase = 'card';
     st.consent = null; st.drafts = []; st.didx = 0; st.generated = false;
-    st.phoneLinked = null; st.linkRequired = false; st.receipt = null; st.sent = false; st.sendError = null; st.perror = null;
+    st.phoneLinked = null; st.linkRequired = false; st.receipt = null; st.sent = false; st.sending = null; st.sendError = null; st.perror = null;
     ui.closePersonal();
     ui.render();
   }
 
-  return { st, currentLine, showPick, selectLane, skip, retry, openCheck, checkProgress, sendShared, sendPrivate, loadConsent, toggleConsent, generate, signedOut, stopPoll };
+  // Whether a send for the line currently shown, in the current lane, is in flight.
+  const sendingNow = () => st.sending === sendKey();
+
+  return { st, currentLine, showPick, selectLane, skip, retry, openCheck, checkProgress, sendShared, sendPrivate, sendingNow, loadConsent, toggleConsent, generate, signedOut, stopPoll };
 }

@@ -83,7 +83,8 @@ test('sign-out completes locally even if the server revoke fails', async () => {
 test('sign-in sends the magic link with the publishable key only, never an Authorization header', async () => {
   const { s, fetch } = make();
   const r = await s.signIn(' me@x.test ');
-  assert.deepEqual(r, { ok: true });
+  assert.equal(r.ok, true);
+  assert.match(r.id, /^[\w-]{16,}$/, 'the request is named, so a send started for it can tell when a newer one overtakes it');
   const c = fetch.calls[0];
   assert.equal(c.init.headers.apikey, KEY);
   assert.ok(!Object.keys(c.init.headers).some((h) => h.toLowerCase() === 'authorization'));
@@ -97,7 +98,7 @@ test('sign-in sends the magic link with the publishable key only, never an Autho
 test('the PKCE verifier is kept locally and never sent; the challenge is its SHA-256', async () => {
   const { s, fetch, storage } = make();
   await s.signIn('me@x.test');
-  const verifier = storage.getItem('wv.pkce');
+  const verifier = JSON.parse(storage.getItem('wv.pkce')).verifier;
   assert.ok(verifier && verifier.length >= 43);
   assert.ok(!fetch.calls[0].init.body.includes(verifier));
   const digest = Buffer.from(await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))).toString('base64url');
@@ -123,14 +124,242 @@ test('sign-in maps 429 and failures to honest errors', async () => {
 test('completeSignIn exchanges the code with the stored verifier and keeps only the session', async () => {
   const { s, fetch, storage } = make();
   await s.signIn('me@x.test');
-  const verifier = storage.getItem('wv.pkce');
+  const verifier = JSON.parse(storage.getItem('wv.pkce')).verifier;
   const r = await s.completeSignIn('?code=abc&web=1&next=%2Fworld-vibe%2Fexplore%2F');
-  assert.deepEqual(r, { ok: true, next: '/world-vibe/explore/' });
+  assert.deepEqual(r, { ok: true, next: '/world-vibe/explore/', user_id: 'u-1' }, 'the callback learns the account the link signed in');
   const ex = fetch.calls.find((c) => c.url.includes('grant_type=pkce'));
   assert.deepEqual(ex.body, { auth_code: 'abc', code_verifier: verifier });
-  assert.equal(storage.getItem('wv.pkce'), null);
+  assert.equal(JSON.parse(storage.getItem('wv.pkce')).verifier, undefined, 'the verifier is gone once used');
   assert.equal(s.email(), 'me@x.test');
   assert.equal(s.userId(), 'u-1');
+});
+
+test('an exchange that finishes after a newer email request leaves that request\'s verifier in place', async () => {
+  let release;
+  const base = gotrue();
+  const fetch = async (url, init) => { const r = base(url, init); if (String(url).includes('grant_type=pkce')) await new Promise((res) => { release = res; }); return r; };
+  fetch.calls = base.calls;
+  const { s, storage } = make({ fetch });
+  await s.signIn('me@x.test', { next: '/world-vibe/?arrived_from=pick-one&send=n1', send: { slug: 'pick-one', nonce: 'n1' } });
+  const completing = s.completeSignIn('?code=abc&next=' + encodeURIComponent('/world-vibe/?arrived_from=pick-one&send=n1'));
+  for (let i = 0; i < 20 && !release; i++) await new Promise((r) => setImmediate(r));
+  assert.ok(release, 'the exchange is in flight');
+  assert.equal((await s.signIn('me@x.test')).ok, true, 'a newer, ordinary request, say from the account bar in another tab');
+  const newer = storage.getItem('wv.pkce');
+  release();
+  assert.equal((await completing).ok, true, 'the older link still signs the person in');
+  assert.equal(storage.getItem('wv.pkce'), newer, 'the newer link can still be exchanged');
+  assert.equal(storage.getItem('wv.send_intent'), null, 'a superseded exchange hands no send over');
+});
+
+test('an email request overtaken while its challenge is computed sends no email and leaves the newer request\'s verifier', async () => {
+  const held = [];
+  let n = 0;
+  const crypto = {
+    getRandomValues: (a) => globalThis.crypto.getRandomValues(a),
+    subtle: { digest: async (alg, data) => { if (n++ === 0) await new Promise((res) => held.push(res)); return globalThis.crypto.subtle.digest(alg, data); } }
+  };
+  const { s, storage, fetch } = make({ crypto });
+  const older = s.signIn('me@x.test');
+  await new Promise((r) => setImmediate(r));
+  const first = storage.getItem('wv.pkce');
+  assert.ok(first, 'the first request stores its record before its challenge is computed');
+  assert.equal((await s.signIn('me@x.test')).ok, true);
+  const newer = storage.getItem('wv.pkce');
+  assert.notEqual(newer, first);
+  held[0]();
+  assert.deepEqual(await older, { error: 'superseded' });
+  assert.equal(fetch.calls.filter((c) => c.url.includes('/auth/v1/otp')).length, 1, 'only the newer email went out');
+  assert.equal(storage.getItem('wv.pkce'), newer, 'and its verifier is the one kept');
+  const otp = fetch.calls.find((c) => c.url.includes('/auth/v1/otp'));
+  const digest = Buffer.from(await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.parse(newer).verifier))).toString('base64url');
+  assert.equal(otp.body.code_challenge, digest, 'the email that went out carries the challenge of the kept verifier');
+});
+
+test('a sign-in asked for a send stores it with the verifier in one write; the exchange hands it to the landing page bound to the account', async () => {
+  const { s, storage } = make();
+  const writes = [];
+  const setItem = storage.setItem;
+  storage.setItem = (k, v) => { writes.push(k); return setItem(k, v); };
+  assert.equal((await s.signIn('me@x.test', { next: '/world-vibe/?arrived_from=pick-one&send=n1', send: { slug: 'pick-one', nonce: 'n1' } })).ok, true);
+  assert.deepEqual(writes.filter((k) => k === 'wv.pkce'), ['wv.pkce'], 'the pending link is stored exactly once');
+  const p = JSON.parse(storage.getItem('wv.pkce'));
+  assert.deepEqual(Object.keys(p).sort(), ['id', 'send', 'verifier']);
+  assert.deepEqual(p.send, { slug: 'pick-one', nonce: 'n1' });
+  assert.equal(s.lastSignInId(), p.id);
+  assert.equal(storage.getItem('wv.send_intent'), null, 'nothing is handed to the landing page before the exchange');
+  const r = await s.completeSignIn('?code=abc&web=1&next=' + encodeURIComponent('/world-vibe/?arrived_from=pick-one&send=n1'));
+  assert.deepEqual(r, { ok: true, next: '/world-vibe/?arrived_from=pick-one&send=n1', user_id: 'u-1' });
+  assert.deepEqual(JSON.parse(storage.getItem('wv.send_intent')), { slug: 'pick-one', nonce: 'n1', user: 'u-1', signin: p.id }, 'bound to the account the link signed in and the request it came from');
+  assert.deepEqual(JSON.parse(storage.getItem('wv.pkce')), { id: p.id }, 'the verifier is gone, the request id stays the latest');
+  assert.equal(s.lastSignInId(), p.id);
+  assert.deepEqual(await s.completeSignIn('?code=abc'), { error: 'no_pending_sign_in' }, 'a used link cannot be exchanged again');
+  const again = await s.signIn('me@x.test');
+  assert.equal(again.ok, true);
+  assert.notEqual(again.id, p.id);
+  assert.equal(s.lastSignInId(), again.id, 'the next request becomes the latest');
+  await s.signOut();
+  assert.equal(storage.getItem('wv.send_intent'), null, 'signing out drops it');
+  assert.equal(s.lastSignInId(), null);
+});
+
+// A stand-in for navigator.locks that really serializes: each request runs after the previous one finished.
+function queueLock() {
+  let chain = Promise.resolve();
+  let depth = 0, acquired = 0;
+  return {
+    depth: () => depth, acquired: () => acquired,
+    request: (name, fn) => {
+      assert.equal(name, 'wv.signin');
+      const run = chain.then(async () => { acquired++; depth++; try { return await fn(); } finally { depth--; } });
+      chain = run.catch(() => {});
+      return run;
+    }
+  };
+}
+
+test('the session, the pending record, the handoff and the claim are only ever changed under the cross-tab lock', async () => {
+  const locks = queueLock();
+  const { s, storage } = make({ locks });
+  const setItem = storage.setItem, removeItem = storage.removeItem;
+  const guarded = [];
+  const watched = (k) => k === 'wv.pkce' || k === 'wv.send_intent' || k === 'wv.session' || k === 'wv.signout_epoch';
+  storage.setItem = (k, v) => { if (watched(k)) guarded.push([k, locks.depth() > 0]); return setItem(k, v); };
+  storage.removeItem = (k) => { if (watched(k)) guarded.push([k, locks.depth() > 0]); return removeItem(k); };
+  assert.equal((await s.signIn('me@x.test', { next: '/world-vibe/?arrived_from=pick-one&send=n1', send: { slug: 'pick-one', nonce: 'n1' } })).ok, true);
+  assert.equal((await s.completeSignIn('?code=abc&next=' + encodeURIComponent('/world-vibe/?arrived_from=pick-one&send=n1'))).ok, true);
+  assert.equal(await s.claimSend('pick-one', 'n9'), null, 'a handoff for another link is left alone');
+  assert.deepEqual(await s.claimSend('pick-one', 'n1'), { slug: 'pick-one', nonce: 'n1', user: 'u-1', signin: s.lastSignInId() });
+  assert.equal(await s.claimSend('pick-one', 'n1'), null, 'claimed once');
+  assert.deepEqual(await s.verifyCode('me@x.test', '123456'), { ok: true, user_id: 'u-1' });
+  setItem('wv.session', JSON.stringify({ ...JSON.parse(storage.getItem('wv.session')), expires_at: Math.floor(NOW / 1000) + 10 }));
+  await s.restore();
+  assert.equal(JSON.parse(storage.getItem('wv.session')).access_token, 'access-2', 'the refresh was written');
+  await s.signOut();
+  assert.ok(guarded.some(([k]) => k === 'wv.session') && guarded.some(([k]) => k === 'wv.signout_epoch'), 'sign-out invalidates the session and bumps the epoch under the lock too');
+  assert.ok(guarded.filter(([k]) => k === 'wv.session').length >= 4, 'exchange, code, refresh and sign-out each wrote the session: ' + guarded.filter(([k]) => k === 'wv.session').length);
+  assert.deepEqual(s.snapshot(), { token: null, user_id: null }, 'signed out: one read says so for both');
+  let ran = false;
+  await s.locked(() => { assert.equal(locks.depth(), 1, 'locked() runs its work under the same lock'); ran = true; });
+  assert.equal(ran, true);
+  assert.ok(locks.acquired() >= 8, 'request, exchange, claims, code, refresh, sign-out and locked() each took the lock: ' + locks.acquired());
+  assert.deepEqual(guarded.filter(([, held]) => !held), [], 'every write or removal of the session, the record or the handoff happened under the lock');
+  assert.ok(guarded.length >= 8);
+});
+
+test('the exchange and the refresh read their source and the sign-out epoch in one locked step, so a sign-out cannot slip between them', async () => {
+  const locks = queueLock();
+  const { s, storage } = make({ locks });
+  const getItem = storage.getItem;
+  const reads = [];
+  storage.getItem = (k) => { if (k === 'wv.pkce' || k === 'wv.session' || k === 'wv.signout_epoch') reads.push([k, locks.depth() > 0]); return getItem(k); };
+  await s.signIn('me@x.test');
+  reads.length = 0;
+  assert.equal((await s.completeSignIn('?code=abc&next=%2Fworld-vibe%2F')).ok, true);
+  const firstRecord = reads.find(([k]) => k === 'wv.pkce'), firstEpoch = reads.find(([k]) => k === 'wv.signout_epoch');
+  assert.deepEqual([firstRecord, firstEpoch], [['wv.pkce', true], ['wv.signout_epoch', true]], 'the exchange first reads the record and the epoch under the lock');
+  getItem('wv.session');
+  storage.setItem('wv.session', JSON.stringify({ ...JSON.parse(getItem('wv.session')), expires_at: Math.floor(NOW / 1000) + 10 }));
+  reads.length = 0;
+  await s.restore();
+  const firstSession = reads.find(([k]) => k === 'wv.session'), firstEpoch2 = reads.find(([k]) => k === 'wv.signout_epoch');
+  assert.deepEqual([firstSession, firstEpoch2], [['wv.session', true], ['wv.signout_epoch', true]], 'the refresh first reads the session and the epoch under the lock');
+  assert.equal(JSON.parse(getItem('wv.session')).access_token, 'access-2');
+});
+
+test('a sign-out queued behind the exchange\'s read but ahead of its commit wins: no session is restored', async () => {
+  const locks = queueLock();
+  let releaseToken;
+  const base = gotrue();
+  const fetch = async (url, init) => { const r = base(url, init); if (String(url).includes('grant_type=pkce')) await new Promise((res) => { releaseToken = res; }); return r; };
+  fetch.calls = base.calls;
+  const { s, storage } = make({ fetch, locks });
+  await s.signIn('me@x.test');
+  const completing = s.completeSignIn('?code=abc&next=%2Fworld-vibe%2F');
+  for (let i = 0; i < 20 && !releaseToken; i++) await new Promise((r) => setImmediate(r));
+  assert.ok(releaseToken, 'the record and epoch were read; the exchange is in flight');
+  await s.signOut();
+  releaseToken();
+  assert.deepEqual(await completing, { error: 'signed_out' });
+  assert.equal(storage.getItem('wv.session'), null, 'the signed-out state stands');
+  assert.equal(storage.getItem('wv.pkce'), null, 'and the record cleared by the sign-out stays cleared');
+});
+
+test('a sign-out queued behind the refresh\'s read but ahead of its commit wins: no session is restored', async () => {
+  const locks = queueLock();
+  let releaseRefresh;
+  const base = gotrue();
+  const fetch = async (url, init) => { const r = base(url, init); if (String(url).includes('grant_type=refresh_token')) await new Promise((res) => { releaseRefresh = res; }); return r; };
+  fetch.calls = base.calls;
+  const { s, storage } = make({ fetch, locks });
+  storage.setItem('wv.session', JSON.stringify({ access_token: 'old', refresh_token: 'r', expires_at: Math.floor(NOW / 1000) + 10, user_id: 'u-1', email: 'me@x.test' }));
+  const restoring = s.restore();
+  for (let i = 0; i < 20 && !releaseRefresh; i++) await new Promise((r) => setImmediate(r));
+  assert.ok(releaseRefresh);
+  await s.signOut();
+  releaseRefresh();
+  await restoring;
+  assert.equal(storage.getItem('wv.session'), null, 'the refresh writes nothing after the sign-out');
+});
+
+for (const [outcome, status] of [['succeeds', 200], ['fails', 500]]) {
+  test('a refresh that ' + outcome + ' after a newer sign-in replaced the session writes nothing over it', async () => {
+    const locks = queueLock();
+    let releaseRefresh;
+    const base = gotrue({ refresh: status });
+    const fetch = async (url, init) => { const r = base(url, init); if (String(url).includes('grant_type=refresh_token')) await new Promise((res) => { releaseRefresh = res; }); return r; };
+    fetch.calls = base.calls;
+    const { s, storage } = make({ fetch, locks });
+    storage.setItem('wv.session', JSON.stringify({ access_token: 'old-a', refresh_token: 'r-a', expires_at: Math.floor(NOW / 1000) + 10, user_id: 'u-a', email: 'a@x.test' }));
+    const restoring = s.restore();
+    for (let i = 0; i < 20 && !releaseRefresh; i++) await new Promise((r) => setImmediate(r));
+    assert.ok(releaseRefresh, "A's refresh is in flight");
+    assert.deepEqual(await s.verifyCode('b@x.test', '123456'), { ok: true, user_id: 'u-1' }, 'B signs in meanwhile');
+    releaseRefresh();
+    await restoring;
+    assert.equal(JSON.parse(storage.getItem('wv.session')).access_token, 'access-c', "B's session stands");
+  });
+}
+
+test('a code verified while another tab holds the lock commits only once the lock is free', async () => {
+  const locks = queueLock();
+  const { s, storage } = make({ locks });
+  let release;
+  const holding = locks.request('wv.signin', () => new Promise((r) => { release = r; }));
+  const verifying = s.verifyCode('me@x.test', '123456');
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(storage.getItem('wv.session'), null, 'the verified session waits for the lock');
+  release();
+  await holding;
+  assert.deepEqual(await verifying, { ok: true, user_id: 'u-1' });
+  assert.equal(JSON.parse(storage.getItem('wv.session')).access_token, 'access-c');
+});
+
+test('a sign-out that takes the lock before a late verification commits wins: the verification writes nothing', async () => {
+  const locks = queueLock();
+  let releaseVerify;
+  const base = gotrue();
+  const fetch = async (url, init) => { const r = base(url, init); if (String(url).includes('/auth/v1/verify')) await new Promise((res) => { releaseVerify = res; }); return r; };
+  fetch.calls = base.calls;
+  const { s, storage } = make({ fetch, locks });
+  const verifying = s.verifyCode('me@x.test', '123456');
+  for (let i = 0; i < 20 && !releaseVerify; i++) await new Promise((r) => setImmediate(r));
+  assert.ok(releaseVerify, 'the verification is in flight');
+  await s.signOut();
+  releaseVerify();
+  assert.deepEqual(await verifying, { error: 'signed_out' });
+  assert.equal(storage.getItem('wv.session'), null, 'the cleared session stays cleared');
+});
+
+test('an ordinary sign-in stores no send and hands nothing to the landing page; an older pending record shape is not trusted', async () => {
+  const { s, storage } = make();
+  assert.equal((await s.signIn('me@x.test')).ok, true);
+  assert.deepEqual(Object.keys(JSON.parse(storage.getItem('wv.pkce'))).sort(), ['id', 'verifier']);
+  assert.equal((await s.completeSignIn('?code=abc&next=%2Fworld-vibe%2F')).ok, true);
+  assert.equal(storage.getItem('wv.send_intent'), null);
+  const old = make();
+  old.storage.setItem('wv.pkce', 'plain-verifier-from-before');
+  assert.deepEqual(await old.s.completeSignIn('?code=abc'), { error: 'no_pending_sign_in' });
 });
 
 test('completeSignIn with no pending sign-in (other browser) or no code makes no exchange', async () => {
@@ -354,7 +583,8 @@ test('verifyCode: the six-digit code goes to GoTrue verify with the publishable 
   const { s, fetch, storage } = make();
   await s.signIn('me@x.test');
   const r = await s.verifyCode(' me@x.test ', '123 456');
-  assert.deepEqual(r, { ok: true });
+  assert.deepEqual(r, { ok: true, user_id: 'u-1' }, 'the account the code signed in comes back with the result');
+  assert.deepEqual(s.snapshot(), { token: 'access-c', user_id: 'u-1' });
   const v = fetch.calls.find((c) => c.url.includes('/auth/v1/verify'));
   assert.ok(v, 'verify was called');
   assert.equal(v.init.method, 'POST');
@@ -363,7 +593,7 @@ test('verifyCode: the six-digit code goes to GoTrue verify with the publishable 
   assert.ok(!Object.keys(v.init.headers).some((k) => k.toLowerCase() === 'authorization'), 'no Authorization header in any casing');
   assert.equal(s.getAccessToken(), 'access-c');
   assert.equal(s.email(), 'me@x.test');
-  assert.equal(storage.getItem('wv.pkce'), null, 'the pending link verifier is dropped once the code signed the person in');
+  assert.notEqual(storage.getItem('wv.pkce'), null, 'the pending link verifier is kept: it may belong to a newer email request than this code');
 });
 
 test('verifyCode refuses a malformed code or email without any request', async () => {

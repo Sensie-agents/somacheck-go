@@ -27,7 +27,7 @@ function harness({ routes = {}, signedIn = true } = {}) {
   };
   const events = [];
   const ui = {
-    render: () => events.push('render'), focusCard: () => {}, openCheck: () => events.push('open'), refreshCheck: () => events.push('refresh'),
+    render: () => events.push('render'), focusCard: () => events.push('focusCard'), openCheck: () => events.push('open'), refreshCheck: () => events.push('refresh'),
     closeCheck: () => events.push('closeCheck'), closePersonal: () => events.push('closePersonal'), note: () => {}, focusConsent: () => {},
     signOut: async () => { token = null; flow.signedOut(); }
   };
@@ -47,6 +47,127 @@ test('signed out: the anonymous pick capture is shown and nothing personal is re
   assert.equal(h.st.pick.slug, pickAnon.body.item.slug);
   assert.equal(h.st.pick.reason, 'shared_link');
   assert.deepEqual(h.calls.filter((c) => c.key.includes('/me/')), []);
+});
+
+test('one send at a time, and none after one succeeded: two overlapping sendShared calls make one ask', async () => {
+  const h = harness({ routes: { ...base, 'GET /v1/me/world-vibe/phone': res(200, phoneBody(true)), 'POST /v1/me/world-vibe/items/pick-one/ask': { hold: res(sendOk.status, sendOk.body) } } });
+  await h.flow.showPick();
+  await h.flow.openCheck();
+  const first = h.flow.sendShared();
+  await flush();
+  assert.ok(h.st.sending, 'a send is in flight');
+  await h.flow.sendShared();
+  assert.equal(h.count('POST /v1/me/world-vibe/items/pick-one/ask'), 1, 'the second call is refused while the first is in flight');
+  await h.release('POST /v1/me/world-vibe/items/pick-one/ask');
+  await first;
+  assert.equal(h.st.sending, null);
+  assert.equal(h.st.sent, true);
+  await h.flow.sendShared();
+  assert.equal(h.count('POST /v1/me/world-vibe/items/pick-one/ask'), 1, 'nothing more after a success');
+});
+
+test('an ask still in flight from before a sign-out neither blocks the next sign-in\'s send nor clears its guard when it lands late', async () => {
+  const h = harness({ routes: { ...base, 'GET /v1/me/world-vibe/phone': res(200, phoneBody(true)), 'POST /v1/me/world-vibe/items/pick-one/ask': { hold: res(sendOk.status, sendOk.body) } } });
+  await h.flow.showPick();
+  await h.flow.openCheck();
+  const old = h.flow.sendShared();
+  await flush();
+  assert.ok(h.st.sending);
+  h.signOut();
+  assert.equal(h.st.sending, null, 'sign-out forgets the old send');
+  // the next sign-in asks again for the same line (the harness token is gone after sign-out: the send carries its own)
+  await h.flow.openCheck();
+  const fresh = h.flow.sendShared({ token: 'tok-next' });
+  await flush();
+  assert.equal(h.count('POST /v1/me/world-vibe/items/pick-one/ask'), 2, 'the new send goes out');
+  await h.release('POST /v1/me/world-vibe/items/pick-one/ask', 0);
+  await old;
+  assert.ok(h.st.sending, 'the old response landing late does not clear the new send\'s guard');
+  assert.equal(h.st.sent, false, 'nor count as the new send');
+  await h.release('POST /v1/me/world-vibe/items/pick-one/ask', 1);
+  await fresh;
+  assert.equal(h.st.sending, null);
+  assert.equal(h.st.sent, true);
+});
+
+test('coming back to the same line after moving on: an ask still in flight from the earlier visit neither blocks the new send nor applies to it', async () => {
+  const h = harness({ routes: { ...base, 'GET /v1/me/world-vibe/phone': res(200, phoneBody(true)), 'POST /v1/me/world-vibe/items/pick-one/ask': { hold: res(sendOk.status, sendOk.body) } } });
+  await h.flow.showPick();
+  await h.flow.openCheck();
+  const old = h.flow.sendShared();
+  await flush();
+  assert.ok(h.st.sending);
+  await h.flow.skip();     // the stub shows the same line again: a new visit of the same slug
+  assert.equal(h.st.pick.slug, 'pick-one');
+  assert.equal(h.st.sending, null);
+  assert.equal(h.flow.sendingNow(), false);
+  await h.flow.openCheck();
+  const fresh = h.flow.sendShared();
+  await flush();
+  assert.equal(h.count('POST /v1/me/world-vibe/items/pick-one/ask'), 2, 'the new visit sends');
+  assert.equal(h.flow.sendingNow(), true);
+  await h.release('POST /v1/me/world-vibe/items/pick-one/ask', 0);
+  await old;
+  assert.equal(h.flow.sendingNow(), true, 'the earlier visit\'s response leaves the new send\'s guard');
+  assert.equal(h.st.sent, false);
+  await h.release('POST /v1/me/world-vibe/items/pick-one/ask', 1);
+  await fresh;
+  assert.equal(h.st.sent, true);
+});
+
+test('sendingNow is about the line and lane shown: a shared send in flight is not a private line\'s', async () => {
+  const h = harness({ signedIn: true, routes: { ...base, 'GET /v1/me/world-vibe/phone': res(200, phoneBody(true)), 'POST /v1/me/world-vibe/items/pick-one/ask': { hold: res(sendOk.status, sendOk.body) } } });
+  await h.flow.showPick();
+  await h.flow.openCheck();
+  const old = h.flow.sendShared();
+  await flush();
+  assert.equal(h.flow.sendingNow(), true);
+  h.flow.selectLane('private');
+  assert.equal(h.flow.sendingNow(), false, 'the private lane shows no pending send');
+  h.flow.selectLane('shared');
+  assert.equal(h.flow.sendingNow(), true);
+  await h.release('POST /v1/me/world-vibe/items/pick-one/ask');
+  await old;
+  assert.equal(h.flow.sendingNow(), false);
+});
+
+test('a check sheet opened while the next pick loads is closed when that pick lands', async () => {
+  const h = harness({ routes: { 'GET /v1/public/world-vibe/pick': { hold: res(200, PICK) } } });
+  const showing = h.flow.showPick();
+  h.st.sheet = 'check';   // home.js marks the open sheet; the flow only asks it to close
+  await h.release('GET /v1/public/world-vibe/pick');
+  await showing;
+  assert.ok(h.events.includes('closeCheck'), 'the sheet for the old line is closed before the new line renders');
+  assert.ok(h.events.indexOf('closeCheck') < h.events.lastIndexOf('render'));
+  assert.ok(h.events.includes('focusCard'), 'and focus moves to the new card');
+  assert.ok(h.events.lastIndexOf('render') < h.events.lastIndexOf('focusCard'));
+});
+
+test('an older phone lookup landing after a newer one does not overwrite its answer', async () => {
+  let n = 0;
+  const h = harness({ routes: { ...base, 'GET /v1/me/world-vibe/phone': () => ({ hold: n++ === 0 ? res(500, {}) : res(200, phoneBody(true)) }) } });
+  await h.flow.showPick();
+  const first = h.flow.openCheck();     // the sheet that will be closed: its lookup is still out
+  h.st.phoneLinked = null;
+  const second = h.flow.openCheck();    // the reopened sheet asks again
+  await flush();
+  assert.equal(h.count('GET /v1/me/world-vibe/phone'), 2);
+  await h.release('GET /v1/me/world-vibe/phone', 1);
+  await second;
+  assert.equal(h.st.phoneLinked, true, 'the newer lookup says linked');
+  await h.release('GET /v1/me/world-vibe/phone', 0);
+  await first;
+  assert.equal(h.st.phoneLinked, true, 'the older lookup\'s failure, landing late, changes nothing');
+});
+
+test('sendShared posts with the token it is given, not the one read later', async () => {
+  const h = harness({ routes: { ...base, 'GET /v1/me/world-vibe/phone': res(200, phoneBody(true)), 'POST /v1/me/world-vibe/items/pick-one/ask': res(sendOk.status, sendOk.body) } });
+  await h.flow.showPick();
+  await h.flow.openCheck();
+  await h.flow.sendShared({ token: 'tok-checked' });
+  const ask = h.calls.find((c) => c.key === 'POST /v1/me/world-vibe/items/pick-one/ask');
+  assert.equal(ask.init.headers.Authorization, 'Bearer tok-checked');
+  assert.equal(h.st.sent, true);
 });
 
 test('sign-out clears the own reading, the receipt and every other piece of personal state', async () => {

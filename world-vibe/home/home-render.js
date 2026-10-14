@@ -239,6 +239,7 @@ export const SIGNIN_STATUS = {
   signed_out: 'Sign in again.',
   rate_limited: 'Too many tries. Wait a minute and try again.',
   unavailable: "Couldn't send the link. Try again in a moment.",
+  superseded: 'A newer sign-in email was just requested. Use that one.',
   verify_unavailable: "Couldn't check the code. Try again in a moment."
 };
 // Two stages. Before the email is sent: the email field. After it ("sent" with
@@ -260,16 +261,17 @@ export function renderSignInSheet(status, { email = '' } = {}) {
 
 // The statement is only ever shared by its slug: a private draft has none, so a
 // private sheet has no QR, and never leaves the account.
-// ctx: { statement, slug (null for private), shareUrl, signedIn, linkRequired, sent, error,
+// ctx: { statement, slug (null for private), shareUrl, signedIn, linkRequired, sent, pending (a send is on its way: no button), error,
 //        linked (GET /v1/me/world-vibe/phone said true), omitStatement, noProgress } (the last two
 //        are for Explore's own sheet). Send to my phone for a shared line needs linked === true.
 export function renderCheckSheet(ctx) {
   const priv = !ctx.slug;
   // Send is offered only once the phone route confirmed an active agent link.
   const noLink = ctx.linkRequired || ctx.phoneLinked === false;
-  const showSend = ctx.signedIn && ctx.phoneLinked === true && !noLink && !ctx.sent;
+  const showSend = ctx.signedIn && ctx.phoneLinked === true && !noLink && !ctx.sent && !ctx.pending;
   let notice = '';
   if (ctx.sent) notice = 'Sent. Open SomaCheck on your phone.';
+  else if (ctx.pending) notice = 'Sending to your phone.';
   else if (ctx.signedIn && noLink) notice = priv ? 'To send private lines to your phone, connect an agent in SomaCheck.' : 'To send lines straight to your phone, connect an agent in SomaCheck. Scan this instead.';
   else if (ctx.error === 'rate_limited') notice = 'Please wait a moment before sending another.';
   else if (ctx.error === 'pending') notice = 'A check-in is already waiting on your phone.';

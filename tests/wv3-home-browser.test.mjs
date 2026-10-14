@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,10 +51,11 @@ const check = async (name, fn) => {
   try { await fn(); console.log('ok - ' + name); } catch (e) { failed++; console.log('not ok - ' + name + '\n' + e.stack); }
 };
 
-// opts: signedIn, key (default KEY; 'default' leaves the shipped config.js key alone; '' serves a config.js without one), linked (phone route, default true), item (item route status or body), link (true: ask succeeds, false: 422), consent (initial), draftsStatus,
+// opts: signedIn, intent ({ slug, nonce, user, signin }: seeds wv.send_intent as a link exchange would leave it, and wv.pkce with that request id), key (default KEY; 'default' leaves the shipped config.js key alone; '' serves a config.js without one), linked (phone route, default true), item (item route status or body), link (true: ask succeeds, false: 422), consent (initial), draftsStatus,
 //       progress (array of bodies served in order), pageUrl, picks
 async function open(width, opts = {}) {
-  const page = await browser.newPage({ viewport: { width, height: 900 } });
+  // opts.context: open this page in that browser context (a second tab sharing storage with its other pages)
+  const page = opts.context ? await opts.context.newPage() : await browser.newPage({ viewport: { width, height: 900 } });
   await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
   const log = { api: [], sb: [], pickUrls: [], asks: [], drafts: [], draftAsks: [], progress: [], consentWrites: [], phone: [], items: [], otp: [], logout: [], exchange: [], verify: [] };
   let consent = opts.consent === true;
@@ -124,12 +126,17 @@ async function open(width, opts = {}) {
     return route.fulfill({ status: 404 });
   });
   if (opts.key === '') await page.route(ORIGIN + '/world-vibe/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: "window.SOMACHECK_INSTALL_URL = 'https://testflight.apple.com/join/x';" }));
-  await page.addInitScript(({ api, sb, key, signedIn }) => {
+  await page.addInitScript(({ api, sb, key, signedIn, intent }) => {
     window.SOMACHECK_API_BASE = api;
     window.SOMACHECK_SUPABASE_URL = sb;
     if (key && key !== 'default') window.SOMACHECK_SUPABASE_PUBLISHABLE_KEY = key;
     if (signedIn && !localStorage.getItem('wv.session')) localStorage.setItem('wv.session', JSON.stringify({ access_token: 'tok-abc', refresh_token: 'r', expires_at: Math.floor(Date.now() / 1000) + 86400, user_id: 'u-1', email: 'me@x.test' }));
-  }, { api: API, sb: SB, key: opts.key === undefined ? KEY : opts.key, signedIn: opts.signedIn });
+    if (intent && !localStorage.getItem('wv.send_intent')) {
+      localStorage.setItem('wv.send_intent', JSON.stringify(intent));
+      // the request the intent came from is still the latest sign-in
+      if (intent.signin && !localStorage.getItem('wv.pkce')) localStorage.setItem('wv.pkce', JSON.stringify({ id: intent.signin }));
+    }
+  }, { api: API, sb: SB, key: opts.key === undefined ? KEY : opts.key, signedIn: opts.signedIn, intent: opts.intent });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   const navs = [];
@@ -139,6 +146,8 @@ async function open(width, opts = {}) {
   return { page, log, errors, navs };
 }
 const bearers = (log) => [...log.api, ...log.sb].filter((r) => r.auth);
+// The PKCE challenge an email request carries, for checking an exchange used that request's verifier.
+const challengeOf = (verifier) => createHash('sha256').update(verifier).digest('base64url');
 
 await check('signed out: the card shows its reason and no request carries a bearer', async () => {
   const { page, log, errors } = await open(420);
@@ -460,7 +469,967 @@ await check('sign in with the emailed code: the sheet swaps to the code field, a
   assert.equal(log.verify[1].headers.apikey, KEY);
   assert.equal(log.verify[1].headers.authorization, undefined);
   assert.equal(log.exchange.length, 0, 'the code path never touches the PKCE exchange');
+  assert.equal(log.asks.length, 0, 'a sign-in from the account bar sends nothing to the phone');
   await page.close();
+});
+
+await check('sign-in from the check sheet: the emailed link is told to land back on this line, and the code sends it with no further tap', async () => {
+  const { page, log } = await open(420);
+  await page.locator('[data-act="check"]').click();
+  await page.locator('#sheet [data-open="signin"]').click();
+  await page.locator('#si-email').fill('me@x.test');
+  await page.locator('#signin-form button').click();
+  await page.waitForSelector('#code-form');
+  const kept = JSON.parse(await page.evaluate(() => localStorage.getItem('wv.pkce'))).send;
+  assert.equal(kept.slug, 'pick-one', 'the line the email was asked for is stored with the pending link');
+  assert.match(kept.nonce, /^[\w-]{16,}$/);
+  assert.equal(new URLSearchParams(log.otp[0].url).get('redirect_to'), ORIGIN + '/auth/callback/?web=1&next=' + encodeURIComponent('/world-vibe/?arrived_from=pick-one&send=' + kept.nonce), 'only this email\'s link carries the nonce');
+  await page.locator('#si-code').fill('123456');
+  await page.locator('#code-form button').click();
+  await page.waitForFunction(() => document.getElementById('sent') && document.getElementById('sent').textContent.includes('Sent'));
+  assert.deepEqual(log.phone, ['Bearer tok-code'], 'the phone route is asked once, with the new session');
+  assert.deepEqual(log.asks, [{ path: '/v1/me/world-vibe/items/pick-one/ask', auth: 'Bearer tok-code' }]);
+  assert.match(await page.locator('#sheet .big').textContent(), /I trust my gut over my dashboard\./);
+  assert.equal(await page.locator('#sheet [data-act="send"]').count(), 0);
+  assert.equal(await page.locator('#code-form').count(), 0, 'the sign-in sheet is gone');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'sent', 'focus lands on the sent notice');
+  assert.match(await page.locator('#account .who').textContent(), /me@x\.test/);
+  assert.equal(await page.evaluate(() => localStorage.getItem('wv.send_intent')), null, 'nothing is handed to the landing page unless a link is exchanged');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.evaluate(() => document.getElementById('scrim').hidden), true);
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.act), 'check', 'closing the reopened sheet returns focus to the card\'s Check in button');
+  await page.close();
+});
+
+await check('automatic send cancelled while the phone route is still answering: closing the sheet and reopening it posts nothing', async () => {
+  const { page, log } = await open(420);
+  const held = [];
+  await page.route(API + '/v1/me/world-vibe/phone', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    const outcome = await new Promise((res) => held.push(res));
+    return outcome === 500 ? bare(route, 500) : json(route, phoneBody(true));
+  });
+  await page.locator('[data-act="check"]').click();
+  await page.locator('#sheet [data-open="signin"]').click();
+  await page.locator('#si-email').fill('me@x.test');
+  await page.locator('#signin-form button').click();
+  await page.waitForSelector('#code-form');
+  await page.locator('#si-code').fill('123456');
+  await page.locator('#code-form button').click();
+  await page.waitForFunction(() => !document.getElementById('code-form') && !document.getElementById('scrim').hidden && document.querySelector('#sheet .big'));
+  await page.waitForFunction(() => document.querySelectorAll('#sheet [data-act="send"]').length === 0);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.evaluate(() => document.getElementById('scrim').hidden), true);
+  await page.locator('[data-act="check"]').click();
+  for (let i = 0; i < 100 && held.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(held.length, 2, 'both phone lookups are waiting');
+  // The reopened sheet's own lookup answers first: it offers the button, the cancelled send holds nothing back.
+  held[1]();
+  await page.waitForSelector('#sheet [data-act="send"]');
+  assert.doesNotMatch(await page.locator('#sent').textContent(), /Sending/);
+  held[0](500);
+  await page.waitForTimeout(200);
+  assert.equal(log.asks.length, 0, 'the cancelled automatic send never posts');
+  assert.equal(await page.locator('#sheet [data-act="send"]').count(), 1, 'and its late, failed lookup takes nothing away');
+  assert.doesNotMatch(await page.locator('#sent').textContent(), /connect an agent/);
+  await page.locator('[data-act="send"]').click();
+  await page.waitForFunction(() => document.getElementById('sent').textContent.includes('Sent'));
+  assert.equal(log.asks.length, 1, 'the person\'s own tap still sends');
+  await page.close();
+});
+
+await check('sign-in from the check sheet with no agent link: the sheet says to connect one, keeps the QR, and posts nothing', async () => {
+  const { page, log } = await open(420, { linked: false });
+  await page.locator('[data-act="check"]').click();
+  await page.locator('#sheet [data-open="signin"]').click();
+  await page.locator('#si-email').fill('me@x.test');
+  await page.locator('#signin-form button').click();
+  await page.waitForSelector('#code-form');
+  await page.locator('#si-code').fill('123456');
+  await page.locator('#code-form button').click();
+  await page.waitForFunction(() => document.getElementById('sent') && document.getElementById('sent').textContent.includes('connect an agent'));
+  assert.equal(log.asks.length, 0);
+  assert.equal(await page.locator('#sheet [data-act="send"]').count(), 0);
+  assert.ok(await page.locator('#qr canvas, #qr img').count() > 0);
+  await page.close();
+});
+
+await check('sign-in sheet closed before the code: a later sign-in from the account bar sends nothing', async () => {
+  const { page, log } = await open(420);
+  await page.locator('[data-act="check"]').click();
+  await page.locator('#sheet [data-open="signin"]').click();
+  await page.keyboard.press('Escape');
+  await page.locator('#account [data-open="signin"]').click();
+  await page.locator('#si-email').fill('me@x.test');
+  await page.locator('#signin-form button').click();
+  await page.waitForSelector('#code-form');
+  assert.equal(new URLSearchParams(log.otp[0].url).get('redirect_to'), ORIGIN + '/auth/callback/?web=1&next=%2Fworld-vibe%2F');
+  await page.locator('#si-code').fill('123456');
+  await page.locator('#code-form button').click();
+  await page.waitForFunction(() => document.querySelector('#account .who'));
+  assert.equal(log.asks.length, 0);
+  assert.equal(await page.evaluate(() => document.getElementById('scrim').hidden), true);
+  assert.equal(await page.evaluate(() => localStorage.getItem('wv.send_intent')), null, 'no email was asked for from the check sheet, so nothing was kept');
+  await page.close();
+});
+
+await check('back from the emailed link (?arrived_from=slug&send=nonce), signed in: the line goes to the phone once and the address is cleaned', async () => {
+  const { page, log } = await open(420, { signedIn: true, intent: { slug: 'pick-one', nonce: 'n1', user: 'u-1', signin: 'sid-1' }, pageUrl: '/world-vibe/?arrived_from=pick-one&send=n1' });
+  await page.waitForFunction(() => document.getElementById('sent') && document.getElementById('sent').textContent.includes('Sent'));
+  assert.match(log.pickUrls[0], /arrived_from=pick-one/);
+  assert.deepEqual(log.asks, [{ path: '/v1/me/world-vibe/items/pick-one/ask', auth: 'Bearer tok-abc' }]);
+  assert.equal(await page.evaluate(() => location.search), '');
+  assert.equal(await page.evaluate(() => localStorage.getItem('wv.send_intent')), null, 'the intent is single-use');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.act), 'check');
+  await page.reload();
+  await page.waitForSelector('#slot article');
+  assert.equal(log.asks.length, 1, 'a reload does not send again');
+  assert.equal(await page.evaluate(() => document.getElementById('scrim').hidden), true);
+  await page.close();
+});
+
+await check('a ?send= address alone is not consent: signed in without a kept intent, with one for another line, or with another nonce, nothing is sent', async () => {
+  const bare = await open(420, { signedIn: true, pageUrl: '/world-vibe/?arrived_from=pick-one&send=n1' });
+  assert.equal(await bare.page.evaluate(() => location.search), '');
+  assert.equal(bare.log.asks.length, 0);
+  assert.equal(bare.log.phone.length, 0);
+  assert.equal(await bare.page.evaluate(() => document.getElementById('scrim').hidden), true);
+  await bare.page.close();
+  const other = await open(420, { signedIn: true, intent: { slug: 'pick-two', nonce: 'n1', user: 'u-1' }, pageUrl: '/world-vibe/?arrived_from=pick-one&send=n1' });
+  assert.equal(other.log.asks.length, 0);
+  assert.equal(await other.page.evaluate(() => localStorage.getItem('wv.send_intent')), '{"slug":"pick-two","nonce":"n1","user":"u-1"}', 'a mismatched intent is left for its own link');
+  await other.page.close();
+  const older = await open(420, { signedIn: true, intent: { slug: 'pick-one', nonce: 'n2', user: 'u-1' }, pageUrl: '/world-vibe/?arrived_from=pick-one&send=n1' });
+  assert.equal(older.log.asks.length, 0, 'the link of an older attempt does not send');
+  assert.equal(await older.page.evaluate(() => localStorage.getItem('wv.send_intent')), '{"slug":"pick-one","nonce":"n2","user":"u-1"}', 'and leaves the newer attempt waiting');
+  await older.page.close();
+  const unbound = await open(420, { signedIn: true, intent: { slug: 'pick-one', nonce: 'n1' }, pageUrl: '/world-vibe/?arrived_from=pick-one&send=n1' });
+  assert.equal(unbound.log.asks.length, 0, 'an intent no callback bound to an account does not send');
+  assert.equal(await unbound.page.evaluate(() => localStorage.getItem('wv.send_intent')), null, 'but the matching attempt is used up');
+  await unbound.page.close();
+  const elsewhere = await open(420, { signedIn: true, intent: { slug: 'pick-one', nonce: 'n1', user: 'u-b', signin: 'sid-1' }, pageUrl: '/world-vibe/?arrived_from=pick-one&send=n1' });
+  assert.equal(elsewhere.log.asks.length, 0, 'an intent bound to another account does not send');
+  assert.equal(await elsewhere.page.evaluate(() => localStorage.getItem('wv.send_intent')), null);
+  await elsewhere.page.close();
+  const overtaken = await open(420, { signedIn: true, intent: { slug: 'pick-one', nonce: 'n1', user: 'u-1', signin: 'sid-1' }, pageUrl: '/world-vibe/?arrived_from=pick-one&send=n1', noWait: true });
+  await overtaken.page.evaluate(() => localStorage.setItem('wv.pkce', JSON.stringify({ id: 'sid-2' })));
+  await overtaken.page.goto(ORIGIN + '/world-vibe/?arrived_from=pick-one&send=n1');
+  await overtaken.page.waitForSelector('#slot article');
+  assert.equal(overtaken.log.asks.length, 0, 'an intent from a request that is no longer the latest sign-in does not send');
+  assert.equal(await overtaken.page.evaluate(() => localStorage.getItem('wv.send_intent')), null);
+  await overtaken.page.close();
+  const plain = await open(420, { signedIn: true, intent: { slug: 'pick-one', nonce: 'n1' } });
+  assert.equal(plain.log.asks.length, 0, 'an ordinary arrival sends nothing');
+  assert.equal(await plain.page.evaluate(() => localStorage.getItem('wv.send_intent')), '{"slug":"pick-one","nonce":"n1"}', 'and leaves an attempt another tab may still be waiting on');
+  await plain.page.close();
+  const out = await open(420, { intent: { slug: 'pick-one', nonce: 'n1' } });
+  assert.equal(await out.page.evaluate(() => localStorage.getItem('wv.send_intent')), '{"slug":"pick-one","nonce":"n1"}', 'signed out, the attempt keeps waiting for its link');
+  await out.page.close();
+  const signedOut = await open(420, { signedIn: true });
+  await signedOut.page.evaluate(() => localStorage.setItem('wv.send_intent', JSON.stringify({ slug: 'pick-one', nonce: 'n1' })));
+  await signedOut.page.locator('[data-act="signout"]').click();
+  await signedOut.page.waitForSelector('#account [data-open="signin"]');
+  // the clear runs under the cross-tab lock, right after the local sign-out
+  await signedOut.page.waitForFunction(() => localStorage.getItem('wv.send_intent') === null);
+  assert.equal(await signedOut.page.evaluate(() => localStorage.getItem('wv.pkce')), null, 'signing out drops the kept intent and the pending record');
+  await signedOut.page.close();
+});
+
+await check('an email asked for from the check sheet, then a different sign-in through the account bar and its link: the first link cannot send under the second account', async () => {
+  const { page, log } = await open(420);
+  await page.locator('[data-act="check"]').click();
+  await page.locator('#sheet [data-open="signin"]').click();
+  await page.locator('#si-email').fill('first@x.test');
+  await page.locator('#signin-form button').click();
+  await page.waitForSelector('#code-form');
+  const kept = JSON.parse(await page.evaluate(() => localStorage.getItem('wv.pkce'))).send;
+  assert.equal(kept.slug, 'pick-one');
+  await page.keyboard.press('Escape');
+  await page.locator('#account [data-open="signin"]').click();
+  await page.locator('#si-email').fill('second@x.test');
+  await page.locator('#signin-form button').click();
+  await page.waitForSelector('#code-form');
+  assert.equal(JSON.parse(await page.evaluate(() => localStorage.getItem('wv.pkce'))).send, undefined, 'the later, ordinary email takes over the pending sign-in: the earlier link can no longer be exchanged');
+  assert.equal(new URLSearchParams(log.otp[1].url).get('redirect_to'), ORIGIN + '/auth/callback/?web=1&next=%2Fworld-vibe%2F');
+  // The second email's link, through the callback, lands on the plain home signed in.
+  await page.goto(ORIGIN + '/auth/callback/?web=1&code=abc&next=%2Fworld-vibe%2F');
+  await page.waitForURL(ORIGIN + '/world-vibe/');
+  await page.waitForSelector('#account .who');
+  assert.equal(log.asks.length, 0);
+  // The first email's landing address, opened afterwards while signed in as the second account.
+  await page.goto(ORIGIN + '/world-vibe/?arrived_from=pick-one&send=' + kept.nonce);
+  await page.waitForSelector('#slot article');
+  await page.waitForTimeout(200);
+  assert.equal(log.asks.length, 0, 'no callback bound that attempt to an account, so it never sends');
+  assert.equal(log.phone.length, 0);
+  assert.equal(await page.evaluate(() => localStorage.getItem('wv.send_intent')), null, 'and it is used up');
+  assert.equal(await page.evaluate(() => document.getElementById('scrim').hidden), true);
+  await page.close();
+});
+
+await check('two tabs: the emailed link lands as A while its pick loads, another tab signs in as B meanwhile: nothing is sent as B', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
+  const held = [];
+  // Opened on a neutral page first, so the held pick route is in place before the landing load.
+  const a = await open(420, { context: ctx, signedIn: true, intent: { slug: 'pick-one', nonce: 'n1', user: 'u-1', signin: 'sid-1' }, pageUrl: '/world-vibe/chrome/', noWait: true, picks: [PICKS[0], PICKS[0]] });
+  await a.page.route(API + '/v1/public/world-vibe/pick?*', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    await new Promise((res) => held.push(res));
+    return json(route, PICKS[0]);
+  });
+  await a.page.goto(ORIGIN + '/world-vibe/?arrived_from=pick-one&send=n1', { waitUntil: 'commit' });
+  for (let i = 0; i < 100 && held.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(held.length, 1, "A's pick is waiting");
+  const b = await ctx.newPage();
+  await b.goto(ORIGIN + '/world-vibe/chrome/');
+  await b.evaluate(() => localStorage.setItem('wv.session', JSON.stringify({ access_token: 'tok-b', refresh_token: 'r-b', expires_at: Math.floor(Date.now() / 1000) + 86400, user_id: 'u-b', email: 'b@x.test' })));
+  await a.page.waitForFunction(() => /b@x\.test/.test((document.querySelector('#account .who') || {}).textContent || ''));
+  held[0]();
+  await a.page.waitForSelector('#slot article');
+  await a.page.waitForTimeout(300);
+  assert.equal(a.log.asks.length, 0, 'the line is not sent as B');
+  assert.equal(await a.page.evaluate(() => localStorage.getItem('wv.send_intent')), null, 'the link was used up');
+  await ctx.close();
+});
+
+await check('two tabs: an account-bar code completed in one tab leaves the intent another tab is waiting on, and that tab\'s link still sends', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
+  const one = await open(420, { context: ctx });
+  await one.page.locator('#account [data-open="signin"]').click();
+  await one.page.locator('#si-email').fill('me@x.test');
+  await one.page.locator('#signin-form button').click();
+  await one.page.waitForSelector('#code-form');
+  const two = await open(420, { context: ctx, picks: [PICKS[0], PICKS[0]] });
+  await two.page.locator('[data-act="check"]').click();
+  await two.page.locator('#sheet [data-open="signin"]').click();
+  await two.page.locator('#si-email').fill('me@x.test');
+  await two.page.locator('#signin-form button').click();
+  await two.page.waitForSelector('#code-form');
+  const kept = JSON.parse(await two.page.evaluate(() => localStorage.getItem('wv.pkce'))).send;
+  assert.equal(kept.slug, 'pick-one');
+  await one.page.locator('#si-code').fill('123456');
+  await one.page.locator('#code-form button').click();
+  await one.page.waitForSelector('#account .who');
+  assert.equal(one.log.asks.length, 0);
+  assert.deepEqual(JSON.parse(await one.page.evaluate(() => localStorage.getItem('wv.pkce'))).send, kept, 'the other tab\'s attempt is left waiting for its link');
+  await two.page.goto(ORIGIN + '/auth/callback/?web=1&code=abc&next=' + encodeURIComponent('/world-vibe/?arrived_from=pick-one&send=' + kept.nonce));
+  await two.page.waitForURL(ORIGIN + '/world-vibe/');
+  await two.page.waitForFunction(() => document.getElementById('sent') && document.getElementById('sent').textContent.includes('Sent'));
+  assert.equal(two.log.asks.length, 1);
+  await ctx.close();
+});
+
+await check('a code answered late, after its sheet closed and a check-sheet sign-in opened: it signs in without touching the newer sheet, whose own code then sends', async () => {
+  const { page, log } = await open(420, { picks: [PICKS[0], PICKS[0]] });
+  const held = {};
+  await page.route(SB + '/auth/v1/verify', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    const email = JSON.parse(route.request().postData()).email;
+    await new Promise((res) => { held[email] = res; });
+    const who = email === 'a@x.test' ? { token: 'tok-a', id: 'u-a' } : { token: 'tok-b', id: 'u-b' };
+    return json(route, { access_token: who.token, refresh_token: 'r', expires_in: 3600, user: { id: who.id, email } });
+  });
+  await page.locator('#account [data-open="signin"]').click();
+  await page.locator('#si-email').fill('a@x.test');
+  await page.locator('#signin-form button').click();
+  await page.waitForSelector('#code-form');
+  await page.locator('#si-code').fill('123456');
+  await page.locator('#code-form button').click();
+  for (let i = 0; i < 100 && !held['a@x.test']; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(held['a@x.test'], "A's verification is waiting");
+  await page.keyboard.press('Escape');
+  await page.locator('[data-act="check"]').click();
+  await page.locator('#sheet [data-open="signin"]').click();
+  await page.locator('#si-email').fill('b@x.test');
+  await page.locator('#signin-form button').click();
+  await page.waitForSelector('#code-form');
+  const kept = JSON.parse(await page.evaluate(() => localStorage.getItem('wv.pkce'))).send;
+  assert.equal(kept.slug, 'pick-one');
+  await page.locator('#si-code').fill('123456');
+  await page.locator('#code-form button').click();
+  for (let i = 0; i < 100 && !held['b@x.test']; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(held['b@x.test'], "B's verification is waiting too");
+  held['a@x.test']();
+  await page.waitForFunction(() => /a@x\.test/.test((document.querySelector('#account .who') || {}).textContent || ''));
+  await page.waitForTimeout(200);
+  assert.equal(log.asks.length, 0, "the earlier sign-in does not adopt the newer sheet's line");
+  assert.equal(await page.evaluate(() => document.getElementById('scrim').hidden), false, 'the newer sign-in sheet is left as it is');
+  assert.equal(await page.locator('#code-form').count(), 1);
+  held['b@x.test']();
+  await page.waitForFunction(() => document.getElementById('sent') && document.getElementById('sent').textContent.includes('Sent'));
+  assert.deepEqual(log.asks, [{ path: '/v1/me/world-vibe/items/pick-one/ask', auth: 'Bearer tok-b' }], "B's own code, the latest request, sends as B");
+  await page.close();
+});
+await check('two overlapping email submits: only the newest sends an email, and it owns the intent and the verifier its link needs', async () => {
+  const { page, log } = await open(420, { picks: [PICKS[0], PICKS[0]] });
+  await page.locator('[data-act="check"]').click();
+  await page.locator('#sheet [data-open="signin"]').click();
+  await page.locator('#si-email').fill('me@x.test');
+  // Two submits in the same task, as a double tap lands before the sheet can swap.
+  await page.evaluate(() => { const f = document.getElementById('signin-form'); f.requestSubmit(); f.requestSubmit(); });
+  await page.waitForSelector('#code-form');
+  await page.waitForTimeout(200);
+  assert.equal(log.otp.length, 1, 'the overtaken request sends no email');
+  const nonce = new URLSearchParams(new URL(new URLSearchParams(log.otp[0].url).get('redirect_to')).search).get('next').split('send=')[1];
+  const kept = JSON.parse(await page.evaluate(() => localStorage.getItem('wv.pkce'))).send;
+  assert.equal(kept.nonce, nonce, 'the email that went out carries the kept nonce');
+  await page.goto(ORIGIN + '/auth/callback/?web=1&code=abc&next=' + encodeURIComponent('/world-vibe/?arrived_from=pick-one&send=' + nonce));
+  await page.waitForURL(ORIGIN + '/world-vibe/');
+  await page.waitForFunction(() => document.getElementById('sent') && document.getElementById('sent').textContent.includes('Sent'));
+  assert.equal(challengeOf(log.exchange[0].code_verifier), log.otp[0].body.code_challenge, 'the exchange used that email\'s verifier');
+  assert.equal(log.asks.length, 1);
+  await page.close();
+});
+
+await check('a code refused late, after its sheet closed and another sign-in sheet opened: the replacement sheet shows no status for it', async () => {
+  const { page } = await open(420);
+  const held = [];
+  await page.route(SB + '/auth/v1/verify', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    await new Promise((res) => held.push(res));
+    return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'invalid_grant' }) });
+  });
+  await page.locator('#account [data-open="signin"]').click();
+  await page.locator('#si-email').fill('me@x.test');
+  await page.locator('#signin-form button').click();
+  await page.waitForSelector('#code-form');
+  await page.locator('#si-code').fill('000000');
+  await page.locator('#code-form button').click();
+  for (let i = 0; i < 100 && held.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  await page.keyboard.press('Escape');
+  await page.locator('#account [data-open="signin"]').click();
+  held[0]();
+  await page.waitForTimeout(200);
+  assert.equal(await page.locator('#si-status').textContent(), '', 'no stale refusal lands on the new sheet');
+  assert.equal(await page.locator('#si-email').count(), 1);
+  await page.close();
+});
+
+await check('a code for account A answered late, after a check-sheet sign-in as B started its send: the line is never sent as A', async () => {
+  const { page, log } = await open(420);
+  const heldVerify = [], heldPhone = [], phoneAuth = [];
+  await page.route(SB + '/auth/v1/verify', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    const body = JSON.parse(route.request().postData());
+    if (body.email === 'a@x.test') {
+      await new Promise((res) => heldVerify.push(res));
+      return json(route, { access_token: 'tok-a', refresh_token: 'r-a', expires_in: 3600, user: { id: 'u-a', email: 'a@x.test' } });
+    }
+    return json(route, { access_token: 'tok-b', refresh_token: 'r-b', expires_in: 3600, user: { id: 'u-b', email: 'b@x.test' } });
+  });
+  await page.route(API + '/v1/me/world-vibe/phone', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    phoneAuth.push((await route.request().allHeaders()).authorization);
+    await new Promise((res) => heldPhone.push(res));
+    return json(route, phoneBody(true));
+  });
+  await page.locator('#account [data-open="signin"]').click();
+  await page.locator('#si-email').fill('a@x.test');
+  await page.locator('#signin-form button').click();
+  await page.waitForSelector('#code-form');
+  await page.locator('#si-code').fill('123456');
+  await page.locator('#code-form button').click();
+  for (let i = 0; i < 100 && heldVerify.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(heldVerify.length, 1);
+  await page.keyboard.press('Escape');
+  await page.locator('[data-act="check"]').click();
+  await page.locator('#sheet [data-open="signin"]').click();
+  await page.locator('#si-email').fill('b@x.test');
+  await page.locator('#signin-form button').click();
+  await page.waitForSelector('#code-form');
+  await page.locator('#si-code').fill('123456');
+  await page.locator('#code-form button').click();
+  for (let i = 0; i < 100 && heldPhone.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(heldPhone.length, 1, "B's send is waiting on the phone route");
+  assert.deepEqual(phoneAuth, ['Bearer tok-b'], 'the lookup ran as B');
+  heldVerify[0]();
+  await page.waitForFunction(() => /a@x\.test/.test((document.querySelector('#account .who') || {}).textContent || ''));
+  heldPhone[0]();
+  await page.waitForTimeout(300);
+  assert.equal(log.asks.length, 0, 'the line is not sent as A');
+  await page.close();
+});
+
+await check('a code answered late while an unrelated sheet is open: focus stays inside that sheet and Escape still closes it', async () => {
+  const { page } = await open(420);
+  const held = [];
+  await page.route(SB + '/auth/v1/verify', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    await new Promise((res) => held.push(res));
+    return json(route, { access_token: 'tok-code', refresh_token: 'r-code', expires_in: 3600, user: { id: 'u-1', email: 'me@x.test' } });
+  });
+  await page.locator('#account [data-open="signin"]').click();
+  await page.locator('#si-email').fill('me@x.test');
+  await page.locator('#signin-form button').click();
+  await page.waitForSelector('#code-form');
+  await page.locator('#si-code').fill('123456');
+  await page.locator('#code-form button').click();
+  for (let i = 0; i < 100 && held.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  await page.keyboard.press('Escape');
+  await page.locator('[data-open="how"]').click();
+  await page.waitForFunction(() => document.getElementById('sheet-title').textContent === 'How it works');
+  held[0]();
+  await page.waitForSelector('#account .who');
+  assert.equal(await page.evaluate(() => document.getElementById('scrim').hidden), false, 'the unrelated sheet stays open');
+  assert.equal(await page.evaluate(() => document.getElementById('sheet').contains(document.activeElement)), true, 'focus stays inside it');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.evaluate(() => document.getElementById('scrim').hidden), true, 'Escape still closes it');
+  await page.close();
+});
+
+await check('an email request answered late, after its sheet closed and another opened: the replacement sheet stays on its email field and no intent is kept', async () => {
+  const { page } = await open(420);
+  const held = [];
+  await page.route(SB + '/auth/v1/otp?*', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    await new Promise((res) => held.push(res));
+    return json(route, {});
+  });
+  await page.locator('[data-act="check"]').click();
+  await page.locator('#sheet [data-open="signin"]').click();
+  await page.locator('#si-email').fill('me@x.test');
+  await page.locator('#signin-form button').click();
+  for (let i = 0; i < 100 && held.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(held.length, 1);
+  await page.keyboard.press('Escape');
+  await page.locator('#account [data-open="signin"]').click();
+  held[0]();
+  await page.waitForTimeout(200);
+  assert.equal(await page.locator('#code-form').count(), 0);
+  assert.equal(await page.locator('#si-email').count(), 1);
+  assert.equal(JSON.parse(await page.evaluate(() => localStorage.getItem('wv.pkce'))).send.slug, 'pick-one', 'the email went out, so its own link may still send');
+  await page.close();
+});
+
+await check('two tabs: the callback signs in as A, the home document is held, another tab signs in as B before it loads: nothing is sent as B', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
+  const a = await open(420, { context: ctx, picks: [PICKS[0], PICKS[0]] });
+  await a.page.evaluate(() => localStorage.setItem('wv.pkce', JSON.stringify({ id: 'sid-a', verifier: 'verifier-xyz', send: { slug: 'pick-one', nonce: 'n1' } })));
+  const held = [];
+  await a.page.route((u) => u.pathname === '/world-vibe/' && u.searchParams.get('send') === 'n1', async (route) => { await new Promise((res) => held.push(res)); return route.continue(); });
+  await a.page.goto(ORIGIN + '/auth/callback/?web=1&code=abc&next=' + encodeURIComponent('/world-vibe/?arrived_from=pick-one&send=n1'), { waitUntil: 'commit' });
+  for (let i = 0; i < 150 && held.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(held.length, 1, 'the home document after the callback is waiting');
+  const b = await ctx.newPage();
+  await b.goto(ORIGIN + '/world-vibe/chrome/');
+  assert.deepEqual(JSON.parse(await b.evaluate(() => localStorage.getItem('wv.send_intent'))), { slug: 'pick-one', nonce: 'n1', user: 'u-1', signin: 'sid-a' }, 'the exchange bound the attempt to the account it signed in and the request it came from');
+  await b.evaluate(() => localStorage.setItem('wv.session', JSON.stringify({ access_token: 'tok-b', refresh_token: 'r-b', expires_at: Math.floor(Date.now() / 1000) + 86400, user_id: 'u-b', email: 'b@x.test' })));
+  held[0]();
+  await a.page.waitForSelector('#slot article');
+  await a.page.waitForTimeout(300);
+  assert.equal(a.log.asks.length, 0, 'the line is not sent as B');
+  assert.match(await a.page.locator('#account .who').textContent(), /b@x\.test/);
+  assert.equal(await a.page.evaluate(() => localStorage.getItem('wv.send_intent')), null, 'the link was used up');
+  await ctx.close();
+});
+
+await check('two tabs: a check-sheet code signs in, and while its phone lookup is answering another tab makes an ordinary sign-in: nothing is sent', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
+  // The other tab already has its sign-in sheet open from before anyone signed in.
+  const two = await open(420, { context: ctx });
+  await two.page.locator('#account [data-open="signin"]').click();
+  await two.page.locator('#si-email').fill('me@x.test');
+  const one = await open(420, { context: ctx });
+  const heldPhone = [];
+  await one.page.route(API + '/v1/me/world-vibe/phone', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    await new Promise((res) => heldPhone.push(res));
+    return json(route, phoneBody(true));
+  });
+  await one.page.locator('[data-act="check"]').click();
+  await one.page.locator('#sheet [data-open="signin"]').click();
+  await one.page.locator('#si-email').fill('me@x.test');
+  await one.page.locator('#signin-form button').click();
+  await one.page.waitForSelector('#code-form');
+  await one.page.locator('#si-code').fill('123456');
+  await one.page.locator('#code-form button').click();
+  for (let i = 0; i < 100 && heldPhone.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(heldPhone.length, 1, 'the send is waiting on the phone route');
+  await two.page.locator('#signin-form button').click();
+  await two.page.waitForSelector('#code-form');
+  await two.page.locator('#si-code').fill('123456');
+  await two.page.locator('#code-form button').click();
+  await two.page.waitForSelector('#account .who');
+  heldPhone[0]();
+  await one.page.waitForSelector('#sheet [data-act="send"]');
+  await one.page.waitForTimeout(200);
+  assert.equal(one.log.asks.length, 0, 'the newer sign-in took the pending sign-in over, so the earlier one sends nothing');
+  assert.equal(two.log.asks.length, 0);
+  await ctx.close();
+});
+
+// A check-sheet email request in `page`, then its link through the callback, with the landing navigation held.
+async function landLinkHeld(page, held) {
+  await page.locator('[data-act="check"]').click();
+  await page.locator('#sheet [data-open="signin"]').click();
+  await page.locator('#si-email').fill('me@x.test');
+  await page.locator('#signin-form button').click();
+  await page.waitForSelector('#code-form');
+  const nonce = JSON.parse(await page.evaluate(() => localStorage.getItem('wv.pkce'))).send.nonce;
+  await page.keyboard.press('Escape');
+  await page.goto(ORIGIN + '/auth/callback/?web=1&code=abc&next=' + encodeURIComponent('/world-vibe/?arrived_from=pick-one&send=' + nonce), { waitUntil: 'commit' });
+  for (let i = 0; i < 150 && held.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(held.length, 1, 'the landing is waiting');
+}
+
+await check('two tabs: the emailed link lands and its pick is loading; another tab makes an ordinary sign-in with a code for the same account: nothing is sent', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
+  const two = await open(420, { context: ctx });
+  await two.page.locator('#account [data-open="signin"]').click();
+  await two.page.locator('#si-email').fill('me@x.test');
+  const one = await open(420, { context: ctx, picks: [PICKS[0], PICKS[0]] });
+  const held = [];
+  await one.page.route(API + '/v1/public/world-vibe/pick?*', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    if (!route.request().url().includes('arrived_from=')) return json(route, PICKS[0]);
+    await new Promise((res) => held.push(res));
+    return json(route, PICKS[0]);
+  });
+  await landLinkHeld(one.page, held);
+  await two.page.locator('#signin-form button').click();
+  await two.page.waitForSelector('#code-form');
+  await two.page.locator('#si-code').fill('123456');
+  await two.page.locator('#code-form button').click();
+  // A closed sheet keeps its last markup; the scrim going hidden is the sign-in landing.
+  await two.page.waitForFunction(() => document.getElementById('scrim').hidden || /didn't work|Couldn't/.test(document.getElementById('si-status').textContent));
+  assert.equal(await two.page.evaluate(() => document.getElementById('scrim').hidden), true, 'the other tab signed in with its code');
+  held[0]();
+  await one.page.waitForSelector('#slot article');
+  await one.page.waitForTimeout(300);
+  assert.equal(one.log.asks.length, 0, 'a newer sign-in request means the link\'s send is dropped');
+  assert.equal(await one.page.evaluate(() => localStorage.getItem('wv.send_intent')), null, 'and the link is used up');
+  await ctx.close();
+});
+
+await check('two tabs: the emailed link lands and its phone lookup is answering; another tab makes an ordinary sign-in and completes its own link: nothing is sent', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
+  const two = await open(420, { context: ctx });
+  await two.page.locator('#account [data-open="signin"]').click();
+  await two.page.locator('#si-email').fill('me@x.test');
+  const one = await open(420, { context: ctx, picks: [PICKS[0], PICKS[0]] });
+  const heldPhone = [];
+  await one.page.route(API + '/v1/me/world-vibe/phone', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    await new Promise((res) => heldPhone.push(res));
+    return json(route, phoneBody(true));
+  });
+  await landLinkHeld(one.page, heldPhone);
+  await two.page.locator('#signin-form button').click();
+  await two.page.waitForSelector('#code-form');
+  await two.page.goto(ORIGIN + '/auth/callback/?web=1&code=abc&next=%2Fworld-vibe%2F');
+  await two.page.waitForURL(ORIGIN + '/world-vibe/');
+  await two.page.waitForSelector('#account .who');
+  heldPhone[0]();
+  await one.page.waitForSelector('#sheet [data-act="send"]');
+  await one.page.waitForTimeout(200);
+  assert.equal(one.log.asks.length, 0, 'the newer request, exchanged and gone, still means the older send is dropped');
+  await ctx.close();
+});
+
+await check('two tabs: the landing claim waits for the cross-tab lock another tab holds, then sends once', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
+  const holder = await ctx.newPage();
+  await holder.goto(ORIGIN + '/world-vibe/chrome/');
+  // Opened before the hold: page start itself reads the session under the lock.
+  const a = await open(420, { context: ctx, signedIn: true, intent: { slug: 'pick-one', nonce: 'n1', user: 'u-1', signin: 'sid-1' }, pageUrl: '/world-vibe/chrome/', noWait: true });
+  await holder.evaluate(() => { navigator.locks.request('wv.signin', () => new Promise((r) => { window.__release = r; })); });
+  await a.page.goto(ORIGIN + '/world-vibe/?arrived_from=pick-one&send=n1', { waitUntil: 'commit' });
+  await a.page.waitForTimeout(600);
+  assert.equal(a.log.asks.length, 0, 'nothing is claimed while another tab holds the lock');
+  assert.equal(await a.page.evaluate(() => localStorage.getItem('wv.send_intent') !== null), true);
+  await holder.evaluate(() => window.__release());
+  await a.page.waitForFunction(() => document.getElementById('sent') && document.getElementById('sent').textContent.includes('Sent'));
+  assert.deepEqual(a.log.asks, [{ path: '/v1/me/world-vibe/items/pick-one/ask', auth: 'Bearer tok-abc' }]);
+  await ctx.close();
+});
+
+await check('two tabs: a send queued on the lock is cancelled by closing the sheet and moving to another line before the lock is released', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
+  const holder = await ctx.newPage();
+  await holder.goto(ORIGIN + '/world-vibe/chrome/');
+  const one = await open(420, { context: ctx });
+  const heldPhone = [];
+  await one.page.route(API + '/v1/me/world-vibe/phone', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    await new Promise((res) => heldPhone.push(res));
+    return json(route, phoneBody(true));
+  });
+  await one.page.locator('[data-act="check"]').click();
+  await one.page.locator('#sheet [data-open="signin"]').click();
+  await one.page.locator('#si-email').fill('me@x.test');
+  await one.page.locator('#signin-form button').click();
+  await one.page.waitForSelector('#code-form');
+  await one.page.locator('#si-code').fill('123456');
+  await one.page.locator('#code-form button').click();
+  for (let i = 0; i < 100 && heldPhone.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(heldPhone.length, 1, 'signed in; the send is waiting on the phone route');
+  // from here another tab holds the lock; the phone route answers and the send queues behind it
+  await holder.evaluate(() => { navigator.locks.request('wv.signin', () => new Promise((r) => { window.__release = r; })); });
+  heldPhone[0]();
+  await one.page.waitForFunction(() => document.getElementById('sent') && document.getElementById('sent').textContent.includes('Sending'));
+  assert.equal(await one.page.locator('#sheet [data-act="send"]').count(), 0, 'no button while the automatic send is on its way');
+  await one.page.waitForTimeout(300);
+  assert.equal(one.log.asks.length, 0);
+  await one.page.keyboard.press('Escape');
+  await one.page.locator('[data-act="skip"]').click();
+  await one.page.waitForFunction(() => document.querySelector('.line') && document.querySelector('.line').textContent.includes('Monday'));
+  await holder.evaluate(() => window.__release());
+  await one.page.waitForTimeout(400);
+  assert.equal(one.log.asks.length, 0, 'the queued send noticed the sheet closed and the card moved on');
+  await ctx.close();
+});
+
+await check('two tabs: a sign-out queued on the lock ahead of a send empties the session first, so nothing is sent', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
+  const holder = await ctx.newPage();
+  await holder.goto(ORIGIN + '/world-vibe/chrome/');
+  const one = await open(420, { context: ctx });
+  const heldPhone = [];
+  await one.page.route(API + '/v1/me/world-vibe/phone', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    await new Promise((res) => heldPhone.push(res));
+    return json(route, phoneBody(true));
+  });
+  await one.page.locator('[data-act="check"]').click();
+  await one.page.locator('#sheet [data-open="signin"]').click();
+  await one.page.locator('#si-email').fill('me@x.test');
+  await one.page.locator('#signin-form button').click();
+  await one.page.waitForSelector('#code-form');
+  await one.page.locator('#si-code').fill('123456');
+  await one.page.locator('#code-form button').click();
+  for (let i = 0; i < 100 && heldPhone.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(heldPhone.length, 1, 'signed in; the send is waiting on the phone route');
+  // Another tab, signed in through shared storage, opened before the hold.
+  const three = await open(420, { context: ctx });
+  await three.page.waitForSelector('[data-act="signout"]');
+  // from here another tab holds the lock; the sign-out queues on it before the send does
+  await holder.evaluate(() => { navigator.locks.request('wv.signin', () => new Promise((r) => { window.__release = r; })); });
+  await three.page.locator('[data-act="signout"]').click();
+  await three.page.waitForTimeout(200);
+  assert.equal(await three.page.evaluate(() => localStorage.getItem('wv.session') !== null), true, 'the sign-out is waiting for the lock');
+  heldPhone[0]();
+  await one.page.waitForTimeout(200);
+  await holder.evaluate(() => window.__release());
+  await three.page.waitForSelector('#account [data-open="signin"]');
+  await one.page.waitForSelector('#account [data-open="signin"]');
+  await one.page.waitForTimeout(300);
+  assert.equal(one.log.asks.length, 0, 'the send found no session');
+  await ctx.close();
+});
+
+await check('two tabs: while the automatic send waits for the lock, or while its ask is in flight, there is no Send button, and exactly one ask goes out', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
+  const holder = await ctx.newPage();
+  await holder.goto(ORIGIN + '/world-vibe/chrome/');
+  const one = await open(420, { context: ctx });
+  const heldPhone = [], heldAsk = [];
+  await one.page.route(API + '/v1/me/world-vibe/phone', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    await new Promise((res) => heldPhone.push(res));
+    return json(route, phoneBody(true));
+  });
+  await one.page.route(API + '/v1/me/world-vibe/items/pick-one/ask', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    one.log.asks.push({ path: '/v1/me/world-vibe/items/pick-one/ask', auth: (await route.request().allHeaders()).authorization });
+    await new Promise((res) => heldAsk.push(res));
+    return json(route, sendOk.body, sendOk.status);
+  });
+  await one.page.locator('[data-act="check"]').click();
+  await one.page.locator('#sheet [data-open="signin"]').click();
+  await one.page.locator('#si-email').fill('me@x.test');
+  await one.page.locator('#signin-form button').click();
+  await one.page.waitForSelector('#code-form');
+  await one.page.locator('#si-code').fill('123456');
+  await one.page.locator('#code-form button').click();
+  for (let i = 0; i < 100 && heldPhone.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  await holder.evaluate(() => { navigator.locks.request('wv.signin', () => new Promise((r) => { window.__release = r; })); });
+  heldPhone[0]();
+  await one.page.waitForFunction(() => document.getElementById('sent') && document.getElementById('sent').textContent.includes('Sending'));
+  assert.equal(await one.page.locator('#sheet [data-act="send"]').count(), 0, 'no button while waiting for the lock');
+  await holder.evaluate(() => window.__release());
+  for (let i = 0; i < 100 && heldAsk.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(heldAsk.length, 1, 'the automatic ask is in flight');
+  assert.equal(await one.page.locator('#sheet [data-act="send"]').count(), 0, 'no button while the ask is in flight');
+  heldAsk[0]();
+  await one.page.waitForFunction(() => document.getElementById('sent').textContent.includes('Sent'));
+  await one.page.waitForTimeout(200);
+  assert.equal(one.log.asks.length, 1, 'exactly one ask');
+  assert.equal(await one.page.locator('#sheet [data-act="send"]').count(), 0);
+  await ctx.close();
+});
+
+await check('an ask still in flight when the person closes the sheet and signs out does not stop the next sign-in\'s automatic send', async () => {
+  const { page, log } = await open(420, { signedIn: true, picks: [PICKS[0], PICKS[0], PICKS[0]] });
+  const heldAsk = [];
+  await page.route(API + '/v1/me/world-vibe/items/pick-one/ask', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    log.asks.push({ path: '/v1/me/world-vibe/items/pick-one/ask', auth: (await route.request().allHeaders()).authorization });
+    await new Promise((res) => heldAsk.push(res));
+    return json(route, sendOk.body, sendOk.status);
+  });
+  await page.locator('[data-act="check"]').click();
+  await page.locator('[data-act="send"]').click();
+  for (let i = 0; i < 100 && heldAsk.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(heldAsk.length, 1, 'the first ask is in flight');
+  await page.keyboard.press('Escape');
+  await page.locator('[data-act="signout"]').click();
+  await page.waitForSelector('#account [data-open="signin"]');
+  await page.locator('[data-act="check"]').click();
+  await page.locator('#sheet [data-open="signin"]').click();
+  await page.locator('#si-email').fill('me@x.test');
+  await page.locator('#signin-form button').click();
+  await page.waitForSelector('#code-form');
+  await page.locator('#si-code').fill('123456');
+  await page.locator('#code-form button').click();
+  for (let i = 0; i < 150 && heldAsk.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(heldAsk.length, 2, 'the new sign-in\'s automatic send goes out while the old ask is still in flight');
+  assert.equal(log.asks[1].auth, 'Bearer tok-code');
+  heldAsk[0]();
+  await page.waitForTimeout(200);
+  assert.match(await page.locator('#sent').textContent(), /Sending/, 'the old response landing late changes nothing');
+  heldAsk[1]();
+  await page.waitForFunction(() => document.getElementById('sent').textContent.includes('Sent'));
+  await page.close();
+});
+
+await check('back on the same line after Not this one: the earlier ask, still in flight, neither blocks the new send nor shows its late failure', async () => {
+  const { page, log } = await open(420, { signedIn: true, picks: [PICKS[0], PICKS[0]] });
+  const held = [];
+  await page.route(API + '/v1/me/world-vibe/items/pick-one/ask', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    log.asks.push({ path: '/v1/me/world-vibe/items/pick-one/ask', auth: (await route.request().allHeaders()).authorization });
+    const outcome = await new Promise((res) => held.push(res));
+    return outcome === 500 ? bare(route, 500) : json(route, sendOk.body, sendOk.status);
+  });
+  await page.locator('[data-act="check"]').click();
+  await page.locator('[data-act="send"]').click();
+  for (let i = 0; i < 100 && held.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  await page.keyboard.press('Escape');
+  await page.locator('[data-act="skip"]').click();
+  await page.waitForTimeout(200);
+  assert.equal(await page.locator('.line').textContent(), 'I trust my gut over my dashboard.', 'the same line came back');
+  await page.locator('[data-act="check"]').click();
+  await page.locator('[data-act="send"]').click();
+  for (let i = 0; i < 100 && held.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(held.length, 2, 'the new visit sends');
+  await page.locator('[data-act="send"]').click();
+  await page.waitForTimeout(100);
+  assert.equal(held.length, 2, 'a second tap while the ask is in flight makes no further ask');
+  held[0](500);
+  await page.waitForTimeout(200);
+  assert.doesNotMatch(await page.locator('#sent').textContent(), /Couldn't/, 'the earlier visit\'s failure is not this visit\'s');
+  await page.locator('[data-act="send"]').click();
+  await page.waitForTimeout(100);
+  assert.equal(held.length, 2, 'and the late failure does not reopen the way to a third ask');
+  held[1](200);
+  await page.waitForFunction(() => document.getElementById('sent').textContent.includes('Sent'));
+  assert.equal(log.asks.length, 2);
+  await page.close();
+});
+
+await check('a shared ask in flight does not hide a private line\'s Send button', async () => {
+  const { page, log } = await open(420, { signedIn: true, consent: true });
+  const held = [];
+  await page.route(API + '/v1/me/world-vibe/items/pick-one/ask', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    await new Promise((res) => held.push(res));
+    return json(route, sendOk.body, sendOk.status);
+  });
+  await page.locator('[data-act="check"]').click();
+  await page.locator('[data-act="send"]').click();
+  for (let i = 0; i < 100 && held.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  await page.keyboard.press('Escape');
+  await page.locator('#tab-private').click();
+  await page.waitForFunction(() => document.getElementById('consent') && document.getElementById('consent').checked);
+  await page.locator('[data-act="generate"]').click();
+  await page.waitForSelector('#slot .line:not(.small)');
+  await page.locator('[data-act="check"]').click();
+  await page.waitForSelector('#sheet [data-act="send"]');
+  assert.doesNotMatch(await page.locator('#sent').textContent(), /Sending/);
+  held[0]();
+  await page.waitForTimeout(200);
+  assert.equal(await page.locator('#sheet [data-act="send"]').count(), 1, 'the private sheet is untouched by the shared response');
+  assert.equal(log.draftAsks.length, 0);
+  await page.close();
+});
+
+await check('Check in opened while the next pick loads: the sheet closes when the new line lands, and a sign-in started from it sends nothing for the line that moved on', async () => {
+  const { page, log } = await open(420);
+  const held = [];
+  let next = 1;
+  await page.route(API + '/v1/public/world-vibe/pick?*', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    if (!route.request().url().includes('exclude=')) return json(route, PICKS[0]);
+    await new Promise((res) => held.push(res));
+    return json(route, PICKS[next++]);   // pick-two, then pick-three
+  });
+  await page.locator('[data-act="skip"]').click();
+  for (let i = 0; i < 100 && held.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  await page.locator('[data-act="check"]').click();
+  assert.match(await page.locator('#sheet .big').textContent(), /I trust my gut over my dashboard\./, 'the sheet shows the line still on the card');
+  held[0]();
+  await page.waitForFunction(() => document.querySelector('.line') && document.querySelector('.line').textContent.includes('Monday'));
+  assert.equal(await page.evaluate(() => document.getElementById('scrim').hidden), true, 'the sheet for the old line closed when the new one landed');
+  assert.equal(await page.evaluate(() => document.getElementById('slot').contains(document.activeElement)), true, 'focus moved to the new card');
+  // The same, but the sign-in is started from the stale sheet before the new line lands.
+  await page.locator('[data-act="skip"]').click();
+  for (let i = 0; i < 100 && held.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  await page.locator('[data-act="check"]').click();
+  await page.locator('#sheet [data-open="signin"]').click();
+  await page.locator('#si-email').fill('me@x.test');
+  await page.locator('#signin-form button').click();
+  await page.waitForSelector('#code-form');
+  held[1]();
+  await page.waitForFunction(() => document.querySelector('.line') && document.querySelector('.line').textContent.includes('yes too often'));
+  await page.locator('#si-code').fill('123456');
+  await page.locator('#code-form button').click();
+  await page.waitForSelector('#account .who');
+  await page.waitForTimeout(300);
+  assert.equal(log.asks.length, 0, 'nothing is sent: the line the sign-in was for is no longer the one on the card');
+  assert.equal(log.phone.length, 0);
+  assert.equal(await page.evaluate(() => document.getElementById('scrim').hidden), true);
+  await page.close();
+});
+
+await check('two tabs: an older account-bar sign-in as A lands first, then the check-sheet code for B is entered: B\'s own sign-in sends its line as B', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
+  const one = await open(420, { context: ctx });
+  const heldA = [];
+  await one.page.route(SB + '/auth/v1/verify', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    await new Promise((res) => heldA.push(res));
+    return json(route, { access_token: 'tok-a', refresh_token: 'r-a', expires_in: 3600, user: { id: 'u-a', email: 'a@x.test' } });
+  });
+  await one.page.locator('#account [data-open="signin"]').click();
+  await one.page.locator('#si-email').fill('a@x.test');
+  await one.page.locator('#signin-form button').click();
+  await one.page.waitForSelector('#code-form');
+  await one.page.locator('#si-code').fill('123456');
+  await one.page.locator('#code-form button').click();
+  for (let i = 0; i < 100 && heldA.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  const two = await open(420, { context: ctx });
+  await two.page.route(SB + '/auth/v1/verify', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    return json(route, { access_token: 'tok-b', refresh_token: 'r-b', expires_in: 3600, user: { id: 'u-b', email: 'b@x.test' } });
+  });
+  await two.page.locator('[data-act="check"]').click();
+  await two.page.locator('#sheet [data-open="signin"]').click();
+  await two.page.locator('#si-email').fill('b@x.test');
+  await two.page.locator('#signin-form button').click();
+  await two.page.waitForSelector('#code-form');
+  heldA[0]();
+  await one.page.waitForFunction(() => /a@x\.test/.test((document.querySelector('#account .who') || {}).textContent || ''));
+  await two.page.locator('#si-code').fill('123456');
+  await two.page.locator('#code-form button').click();
+  await two.page.waitForFunction(() => document.getElementById('sent') && document.getElementById('sent').textContent.includes('Sent'));
+  assert.deepEqual(two.log.asks, [{ path: '/v1/me/world-vibe/items/pick-one/ask', auth: 'Bearer tok-b' }], 'B\'s own sign-in, the latest request, sends as B');
+  assert.equal(one.log.asks.length, 0);
+  await ctx.close();
+});
+
+await check('two tabs landing on the same emailed link address at once: one handoff, one send', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
+  const held = [];
+  const hold = async (page) => page.route(API + '/v1/public/world-vibe/pick?*', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    await new Promise((res) => held.push(res));
+    return json(route, PICKS[0]);
+  });
+  const a = await open(420, { context: ctx, signedIn: true, intent: { slug: 'pick-one', nonce: 'n1', user: 'u-1', signin: 'sid-1' }, pageUrl: '/world-vibe/chrome/', noWait: true });
+  const b = await open(420, { context: ctx, pageUrl: '/world-vibe/chrome/', noWait: true });
+  await hold(a.page); await hold(b.page);
+  await a.page.goto(ORIGIN + '/world-vibe/?arrived_from=pick-one&send=n1', { waitUntil: 'commit' });
+  await b.page.goto(ORIGIN + '/world-vibe/?arrived_from=pick-one&send=n1', { waitUntil: 'commit' });
+  for (let i = 0; i < 150 && held.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(held.length, 2, 'both landings are waiting on their pick');
+  held.forEach((res) => res());
+  await a.page.waitForSelector('#slot article');
+  await b.page.waitForSelector('#slot article');
+  await a.page.waitForTimeout(500);
+  assert.equal(a.log.asks.length + b.log.asks.length, 1, 'exactly one tab claimed the handoff and sent');
+  assert.equal(await a.page.evaluate(() => localStorage.getItem('wv.send_intent')), null);
+  await ctx.close();
+});
+
+await check('two tabs: an account-bar email answered after another tab\'s check-sheet email leaves that intent, and its link sends', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
+  const one = await open(420, { context: ctx });
+  const held = [];
+  await one.page.route(SB + '/auth/v1/otp?*', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    await new Promise((res) => held.push(res));
+    return json(route, {});
+  });
+  await one.page.locator('#account [data-open="signin"]').click();
+  await one.page.locator('#si-email').fill('me@x.test');
+  await one.page.locator('#signin-form button').click();
+  for (let i = 0; i < 100 && held.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  const two = await open(420, { context: ctx, picks: [PICKS[0], PICKS[0]] });
+  await two.page.locator('[data-act="check"]').click();
+  await two.page.locator('#sheet [data-open="signin"]').click();
+  await two.page.locator('#si-email').fill('me@x.test');
+  await two.page.locator('#signin-form button').click();
+  await two.page.waitForSelector('#code-form');
+  const kept = JSON.parse(await two.page.evaluate(() => localStorage.getItem('wv.pkce'))).send;
+  held[0]();
+  await one.page.waitForSelector('#code-form');
+  assert.deepEqual(JSON.parse(await one.page.evaluate(() => localStorage.getItem('wv.pkce'))).send, kept, 'the late ordinary response leaves the other tab\'s attempt');
+  await two.page.goto(ORIGIN + '/auth/callback/?web=1&code=abc&next=' + encodeURIComponent('/world-vibe/?arrived_from=pick-one&send=' + kept.nonce));
+  await two.page.waitForURL(ORIGIN + '/world-vibe/');
+  await two.page.waitForFunction(() => document.getElementById('sent') && document.getElementById('sent').textContent.includes('Sent'));
+  assert.equal(challengeOf(two.log.exchange[0].code_verifier), two.log.otp[0].body.code_challenge, 'the exchange used the newer request\'s verifier');
+  assert.equal(two.log.asks.length, 1);
+  await ctx.close();
+});
+
+await check('two tabs: two check-sheet emails, the older answered last: the newer request owns the intent and its link sends', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
+  const one = await open(420, { context: ctx });
+  const held = [];
+  await one.page.route(SB + '/auth/v1/otp?*', async (route) => {
+    if (route.request().method() === 'OPTIONS') return json(route, {});
+    await new Promise((res) => held.push(res));
+    return json(route, {});
+  });
+  await one.page.locator('[data-act="check"]').click();
+  await one.page.locator('#sheet [data-open="signin"]').click();
+  await one.page.locator('#si-email').fill('me@x.test');
+  await one.page.locator('#signin-form button').click();
+  for (let i = 0; i < 100 && held.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  const first = JSON.parse(await one.page.evaluate(() => localStorage.getItem('wv.pkce'))).send;
+  assert.equal(first.slug, 'pick-one', 'the intent is kept before the request is answered');
+  const two = await open(420, { context: ctx, picks: [PICKS[0], PICKS[0]] });
+  await two.page.locator('[data-act="check"]').click();
+  await two.page.locator('#sheet [data-open="signin"]').click();
+  await two.page.locator('#si-email').fill('me@x.test');
+  await two.page.locator('#signin-form button').click();
+  await two.page.waitForSelector('#code-form');
+  const kept = JSON.parse(await two.page.evaluate(() => localStorage.getItem('wv.pkce'))).send;
+  assert.notEqual(kept.nonce, first.nonce);
+  held[0]();
+  await one.page.waitForSelector('#code-form');
+  assert.deepEqual(JSON.parse(await one.page.evaluate(() => localStorage.getItem('wv.pkce'))).send, kept, 'the older response does not take the intent back');
+  await two.page.goto(ORIGIN + '/auth/callback/?web=1&code=abc&next=' + encodeURIComponent('/world-vibe/?arrived_from=pick-one&send=' + kept.nonce));
+  await two.page.waitForURL(ORIGIN + '/world-vibe/');
+  await two.page.waitForFunction(() => document.getElementById('sent') && document.getElementById('sent').textContent.includes('Sent'));
+  assert.equal(challengeOf(two.log.exchange[0].code_verifier), two.log.otp[0].body.code_challenge, 'the exchange used the newer request\'s verifier');
+  assert.equal(two.log.asks.length, 1);
+  await ctx.close();
+});
+
+await check('back from the emailed link signed out, or when the pick is a different line: nothing is sent', async () => {
+  const out = await open(420, { intent: { slug: 'pick-one', nonce: 'n1' }, pageUrl: '/world-vibe/?arrived_from=pick-one&send=n1' });
+  assert.equal(await out.page.evaluate(() => location.search), '');
+  assert.equal(out.log.asks.length, 0);
+  assert.equal(out.log.phone.length, 0);
+  assert.equal(await out.page.evaluate(() => document.getElementById('scrim').hidden), true);
+  await out.page.close();
+  // The stub serves pick-one whatever arrived_from says, so this lands on another line.
+  const other = await open(420, { signedIn: true, intent: { slug: 'pick-nine', nonce: 'n1', user: 'u-1', signin: 'sid-1' }, pageUrl: '/world-vibe/?arrived_from=pick-nine&send=n1' });
+  assert.equal(other.log.asks.length, 0);
+  assert.equal(await other.page.evaluate(() => document.getElementById('scrim').hidden), true);
+  await other.page.close();
 });
 
 await check('the shipped config carries the publishable key: Sign in shows without any override', async () => {
@@ -482,6 +1451,7 @@ await check('sign out clears the session: no bearer afterwards, token gone from 
   await page.locator('[data-act="signout"]').click();
   await page.waitForFunction(() => !localStorage.getItem('wv.session'));
   await page.waitForSelector('#account [data-open="signin"]');
+  for (let i = 0; i < 100 && log.logout.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
   assert.deepEqual(log.logout, ['Bearer tok-abc']);
   const before = log.api.length;
   await page.locator('[data-act="skip"]').click();
@@ -508,7 +1478,7 @@ await check('sign out removes the own reading from the page and drops a progress
 
 await check('callback from a web sign-in exchanges the code, stores the session and lands on World Vibe without opening the app', async () => {
   const { page, log, navs } = await open(420, { pageUrl: '/world-vibe/', noWait: true });
-  await page.evaluate(() => localStorage.setItem('wv.pkce', 'verifier-xyz'));
+  await page.evaluate(() => localStorage.setItem('wv.pkce', JSON.stringify({ verifier: 'verifier-xyz' })));
   await page.goto(ORIGIN + '/auth/callback/?web=1&code=abc&next=%2Fworld-vibe%2F');
   await page.waitForURL(ORIGIN + '/world-vibe/');
   assert.deepEqual(log.exchange, [{ auth_code: 'abc', code_verifier: 'verifier-xyz' }]);
@@ -657,6 +1627,7 @@ await axeCheck('home signed in', async () => {}, { open: { signedIn: true } });
 await axeCheck('check sheet with QR', async (p) => { await p.locator('[data-act="check"]').click(); await p.waitForSelector('#qr img', { state: 'attached' }); });
 await axeCheck('check sheet signed in after link_required', async (p) => { await p.locator('[data-act="check"]').click(); await p.locator('[data-act="send"]').click(); await p.waitForFunction(() => document.getElementById('sent').textContent.includes('connect an agent')); }, { open: { signedIn: true, link: false } });
 await axeCheck('sign-in sheet', async (p) => { await p.locator('#account [data-open="signin"]').click(); });
+await axeCheck('check sheet sent right after a sign-in from it', async (p) => { await p.locator('[data-act="check"]').click(); await p.locator('#sheet [data-open="signin"]').click(); await p.locator('#si-email').fill('me@x.test'); await p.locator('#signin-form button').click(); await p.waitForSelector('#code-form'); await p.locator('#si-code').fill('123456'); await p.locator('#code-form button').click(); await p.waitForFunction(() => document.getElementById('sent') && document.getElementById('sent').textContent.includes('Sent')); });
 await axeCheck('sign-in sheet, code stage', async (p) => { await p.locator('#account [data-open="signin"]').click(); await p.locator('#si-email').fill('me@x.test'); await p.locator('#signin-form button').click(); await p.waitForSelector('#code-form'); });
 await axeCheck('bring your own line sheet', async (p) => { await p.locator('[data-open="bring"]').click(); });
 await axeCheck('private lane signed out', async (p) => { await p.locator('#tab-private').click(); });
