@@ -1,0 +1,264 @@
+// Real-browser checks for Explore: viewport behaviour of the Chrome callout,
+// curator click, Following tab network source, and axe. Needs Playwright and
+// axe-core (PLAYWRIGHT_PATH, AXE_PATH override the defaults).
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url);
+const { chromium } = require(process.env.PLAYWRIGHT_PATH || '/opt/homebrew/lib/node_modules/playwright');
+const AXE = process.env.AXE_PATH || '/Users/theagents/.npm/_npx/e003b6b07d062486/node_modules/axe-core/axe.min.js';
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
+
+const server = createServer(async (req, res) => {
+  const p = new URL(req.url, 'http://x').pathname;
+  try {
+    const file = path.join(root, p.endsWith('/') ? p + 'index.html' : p);
+    res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'text/plain' });
+    res.end(await readFile(file));
+  } catch { res.writeHead(404).end(); }
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const url = 'http://127.0.0.1:' + server.address().port + '/world-vibe/explore/';
+
+// The page talks to the live routes; the browser tests answer them with
+// envelopes built from the captured contract fixtures.
+const fx = async (n) => JSON.parse(await readFile(path.join(root, 'world-vibe', 'explore', 'fixtures', n), 'utf8'));
+const REAL = { feed: await fx('wv3_explore_feed.json'), item: await fx('wv3_explore_item.json'), curators: await fx('wv3_explore_curators.json'), featured: await fx('wv3_explore_featured.json'), following: await fx('wv3_explore_following.json') };
+const FOLLOWING_401 = await fx('wv3_refusal_following_feed_401.json');
+const [A, B] = REAL.curators.map((c) => c.curator_id);
+const row = (o) => ({ ...REAL.feed, ...o });
+const FEED = [
+  row({ slug: 'a-1', curator_id: A, statement: 'I think the first line is mine.' }),
+  row({ slug: 'b-1', curator_id: B, statement: 'I think the second line is theirs.' }),
+  row({ slug: 'a-2', curator_id: A, contributor_count: 7, aligned: null, unaligned: null, lean: 'mixed' }),
+  { ...REAL.item, curator_id: A, curator_name: 'Should Never Render' }
+];
+const API = 'https://api.test';
+const respond = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(body) });
+
+const browser = await chromium.launch();
+let failed = 0;
+const check = async (name, fn) => {
+  try { await fn(); console.log('ok - ' + name); } catch (e) { failed++; console.log('not ok - ' + name + '\n' + e.message); }
+};
+async function open(width, height = 900, opts = {}) {
+  const page = await browser.newPage({ viewport: { width, height } });
+  await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  const headers = [];
+  await page.route(API + '/**', async (route) => {
+    const u = route.request().url();
+    if (u.includes('/world-vibe/feed')) {
+      if (opts.paged) {
+        // 24 one-row pages: the first load stops at the 20 page cap, Load more reads the rest.
+        const n = Number((new URL(u).searchParams.get('cursor') || 'c0').slice(1)) + 1;
+        return respond(route, { items: [row({ slug: 'z-' + n, curator_id: B })], next_cursor: n < 24 ? 'c' + n : null });
+      }
+      return respond(route, { items: FEED, next_cursor: null });
+    }
+    if (u.includes('/world-vibe/curators')) return respond(route, { curators: REAL.curators });
+    if (u.includes('/world-vibe/featured')) return respond(route, { featured: opts.noFeatured ? null : REAL.featured });
+    if (u.includes('/following-feed')) headers.push(await route.request().allHeaders());
+    if (u.includes('/following-feed') && opts.followingStatus === 401) return respond(route, FOLLOWING_401.body, FOLLOWING_401.status);
+    if (u.includes('/following-feed')) return respond(route, opts.followingStatus ? {} : { items: [REAL.following] }, opts.followingStatus || 200);
+    return route.fulfill({ status: 404 });
+  });
+  // A signed-in test seeds the real web session (world-vibe/session.js) in storage.
+  if (opts.token) await page.addInitScript((token) => localStorage.setItem('wv.session', JSON.stringify({ access_token: token, refresh_token: 'r', expires_at: Math.floor(Date.now() / 1000) + 86400, user_id: 'u-1', email: 'me@x.test' })), opts.token);
+  await page.addInitScript((api) => { window.SOMACHECK_API_BASE = api; }, API);
+  const requests = [];
+  page.on('request', (r) => requests.push(r.url()));
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(url);
+  await page.waitForSelector('.post');
+  return { page, requests, errors, headers };
+}
+
+await check('Chrome callout hidden at 999px, visible at 1000px', async () => {
+  const a = await open(999);
+  assert.equal(await a.page.locator('#chrome-callout').isVisible(), false);
+  assert.equal(await a.page.locator('#chrome-callout').evaluate((e) => getComputedStyle(e).display !== 'none' && e.offsetParent !== null), false);
+  await a.page.close();
+  const b = await open(1000);
+  assert.equal(await b.page.locator('#chrome-callout').isVisible(), true);
+  await b.page.close();
+});
+
+await check('Chrome callout hidden at 420px', async () => {
+  const a = await open(420);
+  assert.equal(await a.page.locator('#chrome-callout').isVisible(), false);
+  await a.page.close();
+});
+
+await check('curator click filters by curator_id (two curators both named Alex), click again clears', async () => {
+  const m = await open(420);
+  assert.equal(await m.page.locator('.post').count(), 4);
+  await m.page.click('#strip [data-who="' + A + '"]');
+  assert.deepEqual(await m.page.locator('.post').evaluateAll((els) => els.map((e) => e.dataset.slug)), ['a-1', 'a-2']);
+  assert.equal(await m.page.locator('#filter').isVisible(), true);
+  assert.equal(await m.page.locator('#filter-text').textContent(), 'Lines from Alex');
+  await m.page.click('#clear');
+  assert.equal(await m.page.locator('.post').count(), 4);
+  await m.page.close();
+  const d = await open(1280);
+  await d.page.click('#cur-list [data-who="' + B + '"]');
+  assert.deepEqual(await d.page.locator('.post').evaluateAll((els) => els.map((e) => e.dataset.slug)), ['b-1']);
+  assert.equal(await d.page.locator('#cur-list [data-who="' + B + '"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(await d.page.locator('#cur-list [data-who="' + A + '"]').getAttribute('aria-pressed'), 'false');
+  await d.page.close();
+});
+
+await check('Topic of the Week hero renders from /featured and is hidden when there is none', async () => {
+  const a = await open(420);
+  assert.ok(a.requests.some((u) => u.endsWith('/v1/public/world-vibe/featured?slot=topic_of_week')));
+  assert.equal(await a.page.locator('#hero .totw').isVisible(), true);
+  assert.equal(await a.page.locator('#hero h2').textContent(), 'I feel ready for this');
+  await a.page.locator('#hero [data-check]').click();
+  assert.equal(await a.page.locator('#sheet-line').textContent(), 'I feel ready for this');
+  await a.page.close();
+  const b = await open(420, 900, { noFeatured: true });
+  assert.equal(await b.page.locator('#hero').isHidden(), true);
+  await b.page.close();
+});
+
+await check('Following with a token sends the bearer and shows curator name and category', async () => {
+  const { page, requests, headers } = await open(420, 900, { token: 'tok-1' });
+  assert.ok(requests.some((u) => u.endsWith('/v1/public/world-vibe/feed')));
+  assert.ok(!requests.some((u) => u.includes('following-feed')));
+  await page.click('#tab-following');
+  await page.waitForSelector('.post .by b');
+  assert.equal(headers.length, 1);
+  assert.equal(headers[0].authorization, 'Bearer tok-1');
+  assert.equal(await page.locator('.post').count(), 1);
+  assert.equal(await page.locator('.post .by b').textContent(), 'Alex');
+  assert.equal(await page.locator('.post .cat').textContent(), 'Politics');
+  await page.close();
+});
+
+await check('Following without a session makes no request and shows the sign-in state', async () => {
+  const { page, requests } = await open(420);
+  await page.click('#tab-following');
+  await page.waitForSelector('[data-signin-state]');
+  assert.ok(!requests.some((u) => u.includes('following-feed')));
+  assert.equal(await page.locator('.post').count(), 0);
+  assert.match(await page.locator('#feed').textContent(), /Sign in to see who you follow/);
+  assert.equal(await page.locator('#feed a.signin').getAttribute('href'), '/world-vibe/?signin=1');
+  await page.close();
+});
+
+await check('Following 401 with a token shows the sign-in state; 500 shows an error with Try again', async () => {
+  const a = await open(420, 900, { token: 't', followingStatus: 401 });
+  await a.page.click('#tab-following');
+  await a.page.waitForSelector('[data-signin-state]');
+  assert.equal(await a.page.locator('.post').count(), 0);
+  await a.page.close();
+  const b = await open(420, 900, { token: 't', followingStatus: 500 });
+  await b.page.click('#tab-following');
+  await b.page.waitForSelector('[data-retry="following"]');
+  assert.match(await b.page.locator('#feed').textContent(), /Couldn't load who you follow/);
+  assert.doesNotMatch(await b.page.locator('#feed').textContent(), /Follow a curator|No lines/);
+  await b.page.close();
+});
+
+await check('focus stays on the activated curator control after filtering', async () => {
+  const m = await open(420);
+  await m.page.focus('#strip [data-who="' + A + '"]');
+  await m.page.keyboard.press('Enter');
+  assert.equal(await m.page.evaluate(() => document.activeElement.dataset.who), A);
+  assert.equal(await m.page.evaluate(() => document.activeElement.closest('#strip') !== null), true);
+  await m.page.close();
+  const d = await open(1280);
+  await d.page.focus('#cur-list [data-who="' + B + '"]');
+  await d.page.keyboard.press('Space');
+  assert.equal(await d.page.evaluate(() => document.activeElement.dataset.who), B);
+  assert.equal(await d.page.evaluate(() => document.activeElement.closest('#cur-list') !== null), true);
+  await d.page.close();
+});
+
+await check('ARIA tabs: roving tabindex and arrow keys, Home and End', async () => {
+  const { page } = await open(420, 900, { token: 't' });
+  const state = () => page.evaluate(() => [...document.querySelectorAll('.tab')].map((t) => t.tabIndex + ':' + t.getAttribute('aria-selected')));
+  assert.deepEqual(await state(), ['0:true', '-1:false']);
+  await page.focus('#tab-all');
+  await page.keyboard.press('ArrowRight');
+  assert.deepEqual(await state(), ['-1:false', '0:true']);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'tab-following');
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'tab-all');
+  await page.keyboard.press('End');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'tab-following');
+  await page.keyboard.press('Home');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'tab-all');
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'tab-following');
+  await page.close();
+});
+
+await check('Load more appears at the page cap and appends the remaining pages', async () => {
+  const { page, requests } = await open(420, 900, { paged: true });
+  assert.equal(await page.locator('.post').count(), 20);
+  assert.equal(await page.locator('#end [data-more]').count(), 1);
+  assert.doesNotMatch(await page.locator('#end').textContent(), /caught up/);
+  await page.click('#end [data-more]');
+  await page.waitForSelector('[data-slug="z-24"]');
+  assert.ok(requests.some((u) => u.endsWith('/feed?cursor=c23')));
+  assert.equal(await page.locator('.post').count(), 24);
+  assert.equal(await page.locator('#end').textContent(), "You're all caught up.");
+  await page.close();
+});
+
+await check('public-signal card never shows the curator name in the DOM', async () => {
+  const { page } = await open(1280);
+  const body = await page.content();
+  assert.ok(!body.includes('Should Never Render'));
+  assert.ok(!body.includes('Shown publicly by choice'), 'the public-signal label is gone');
+  await page.close();
+});
+
+await check('Check in sheet opens with the exact statement and closes on Escape', async () => {
+  const { page } = await open(420);
+  await page.locator('.post').first().locator('[data-check]').click();
+  assert.equal(await page.locator('#sheet-line').textContent(), 'I think the first line is mine.');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#scrim').isHidden(), true);
+  await page.close();
+});
+
+await check('keyboard Tab inside the Check in sheet reaches the QR universal link and wraps', async () => {
+  const { page } = await open(420);
+  await page.locator('.post').first().locator('[data-check]').click();
+  const seen = new Set();
+  for (let i = 0; i < 8; i++) {
+    await page.keyboard.press('Tab');
+    seen.add(await page.evaluate(() => document.activeElement.className || document.activeElement.id));
+  }
+  assert.ok([...seen].some((c) => /open-link/.test(c)), 'focus reached the link: ' + [...seen].join(', '));
+  assert.equal(await page.evaluate(() => document.getElementById('scrim').contains(document.activeElement)), true, 'focus never left the sheet');
+  await page.close();
+});
+
+for (const [name, width, act] of [
+  ['mobile 420', 420, null], ['mobile 420 following signed out', 420, '#tab-following'], ['mobile 420 curator filter', 420, '#strip [data-who="' + B + '"]'],
+  ['desktop 1280', 1280, null], ['desktop 1280 curator filter', 1280, '#cur-list [data-who="' + A + '"]']
+]) {
+  await check('axe 0 serious/critical: ' + name, async () => {
+    const { page, errors } = await open(width);
+    if (act) await page.click(act);
+    await page.addScriptTag({ path: AXE });
+    const res = await page.evaluate(() => axe.run(document, { resultTypes: ['violations'] }));
+    const bad = res.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
+    assert.deepEqual(bad.map((v) => v.id + ': ' + v.nodes.map((n) => n.target.join(' ')).join(' | ')), []);
+    assert.deepEqual(errors, []);
+    await page.close();
+  });
+}
+
+await browser.close();
+server.close();
+if (failed) { console.log(failed + ' failed'); process.exit(1); }
+console.log('all browser checks passed');

@@ -65,7 +65,7 @@ try {
     assert.equal(twitterCard, 'summary_large_image', `${topic.slug}: twitter:card must be present`);
   }
 
-  const portalHtml = await readFile(path.join(root, 'world-vibe', 'index.html'), 'utf8');
+  const portalHtml = await readFile(path.join(root, 'world-vibe', 'legacy', 'index.html'), 'utf8');
   const portalTitle = extractMetaContent(portalHtml, 'property', 'og:title');
   const portalDescription = extractMetaContent(portalHtml, 'property', 'og:description');
   const portalImage = extractMetaContent(portalHtml, 'property', 'og:image');
