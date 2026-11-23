@@ -63,7 +63,7 @@ function smartRoute(topic) {
   url.searchParams.set('prompt_id', topic.prompt);
   url.searchParams.set('$canonical_url', stableUrl(topic));
   url.searchParams.set('$fallback_url', stableUrl(topic));
-  url.searchParams.set('$ios_url', 'https://testflight.apple.com/join/C4mAH3zz');
+  url.searchParams.set('$ios_url', 'https://apps.apple.com/us/app/somacheck-vibecheck/id6792978184');
   url.searchParams.set('$ios_nativelink', 'true');
   url.searchParams.set('$deeplink_no_attribution', 'true');
   url.searchParams.set('$do_not_process', 'true');

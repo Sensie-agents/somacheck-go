@@ -49,7 +49,7 @@ const branchBase = 'https://link.somacheck.com';
 const publicShareBase = 'https://go.somacheck.com';
 function stableShareRoute(origin, slug) { return `${origin}/world-vibe/share/${slug}`; }
 // App Store id6792978184 is the post-publication cutover target.
-const installUrl = 'https://testflight.apple.com/join/C4mAH3zz';
+const installUrl = 'https://apps.apple.com/us/app/somacheck-vibecheck/id6792978184';
 const initialTime = '2026-08-26T13:00:00.000Z';
 const firstRefreshTime = '2026-08-26T13:01:00.000Z';
 const unlockedTime = '2026-08-26T13:03:00.000Z';

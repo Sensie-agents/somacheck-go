@@ -1,3 +1,3 @@
-// Single source of truth for the World Vibe install CTA. When the App Store
-// listing goes live, change this one value; no other file needs an edit.
-window.SOMACHECK_INSTALL_URL = window.SOMACHECK_INSTALL_URL || 'https://testflight.apple.com/join/C4mAH3zz';
+// Single source of truth for the World Vibe install CTA. The App Store listing
+// is live; to change the install target, change this one value and no other file.
+window.SOMACHECK_INSTALL_URL = window.SOMACHECK_INSTALL_URL || 'https://apps.apple.com/us/app/somacheck-vibecheck/id6792978184';

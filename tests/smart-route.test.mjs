@@ -18,7 +18,7 @@ const statement = 'I trust my gut more than my dashboard';
 const expectedUniversalLink = `https://go.somacheck.com/s/${token}`;
 const expectedAppLink = `somacheck://s/${token}`;
 // App Store id6792978184 remains the post-publication cutover target.
-const expectedInstallLink = 'https://testflight.apple.com/join/C4mAH3zz';
+const expectedInstallLink = 'https://apps.apple.com/us/app/somacheck-vibecheck/id6792978184';
 
 const [fallback, source, qrLibrary] = await Promise.all([
   readFile(fallbackPath, 'utf8'),
