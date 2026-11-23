@@ -290,7 +290,7 @@
     <section class="how about" id="about-world-vibe" aria-labelledby="about-world-vibe-heading">
       <strong id="about-world-vibe-heading">About World Vibe</strong>
       <p>World Vibe is a public page from SomaCheck. It gathers quotes from around the web and three curated topics, and shows how the people who checked in landed on each one. Each check-in is a 3-second wrist check done in the SomaCheck iPhone app. Your identity is not shown. Results appear only in aggregate, and a card shows the split only after enough people have joined.</p>
-      <p>It is for anyone curious how a group lands on a statement: readers, teams, and people who already use SomaCheck and want to see their own check-in next to everyone else's. You can browse this page without an account. To add a check-in, install SomaCheck on your iPhone, open a quote or topic from this page, and do the wrist check.</p>
+      <p>It is for anyone curious how a group lands on a statement: readers, teams, and people who already use SomaCheck and want to add their own check-in to the public result. You can browse this page without an account. To add a check-in, install SomaCheck on your iPhone, open a quote or topic from this page, and do the wrist check.</p>
       <strong>How it works (Feed):</strong>
       <ol>
         <li>Browse quotes people are checking their gut against right now.</li>
@@ -329,8 +329,7 @@
       var POLL_MS = 7000;
       var DEFAULT_THRESHOLD = 5;
       var SESSION_NONCE_STORAGE_KEY = 'world-vibe-session-nonce';
-      // Runtime seam can cut over to the App Store after publication.
-      // Until then, the working public fallback is TestFlight.
+      // Install fallback when config.js is not loaded: the App Store listing id6792978184.
       var APP_INSTALL_URL = (typeof window !== 'undefined' && window.SOMACHECK_INSTALL_URL) || 'https://apps.apple.com/us/app/somacheck-vibecheck/id6792978184';
       // The immutable, cross-origin Branch host used only for validated one-tap routes.
       // Stable share and QR routes remain on this page's public go.somacheck.com origin.

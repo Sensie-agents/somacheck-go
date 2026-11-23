@@ -48,7 +48,7 @@ const branchBase = 'https://link.somacheck.com';
 // RPC returns no link_url, so the portal derives it from its own origin.
 const publicShareBase = 'https://go.somacheck.com';
 function stableShareRoute(origin, slug) { return `${origin}/world-vibe/share/${slug}`; }
-// App Store id6792978184 is the post-publication cutover target.
+// App Store id6792978184 is the live install destination.
 const installUrl = 'https://apps.apple.com/us/app/somacheck-vibecheck/id6792978184';
 const initialTime = '2026-08-26T13:00:00.000Z';
 const firstRefreshTime = '2026-08-26T13:01:00.000Z';
