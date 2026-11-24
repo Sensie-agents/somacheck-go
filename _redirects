@@ -14,3 +14,14 @@
 # Root: server-side 301 to the World Vibe landing page (replaces the old
 # meta-refresh index.html, which was removed in the same change).
 /  /world-vibe/  301
+
+# Legal pages: somacheck.com is canonical (Mike, 2026-11-23). Server-side 301
+# to the canonical pages; the static privacy/, terms/ and support/ folders
+# were removed in the same change because Pages serves a static asset before
+# any redirect rule is evaluated.
+/privacy   https://somacheck.com/privacy  301
+/privacy/  https://somacheck.com/privacy  301
+/terms     https://somacheck.com/terms    301
+/terms/    https://somacheck.com/terms    301
+/support   https://somacheck.com/support  301
+/support/  https://somacheck.com/support  301
