@@ -5,7 +5,7 @@
   var SMART_ROUTE_ORIGIN = 'https://link.somacheck.com';
   // world-vibe/config.js sets window.SOMACHECK_INSTALL_URL; this literal is a
   // fallback only for environments that don't load that file.
-  var INSTALL_URL = window.SOMACHECK_INSTALL_URL || 'https://testflight.apple.com/join/C4mAH3zz';
+  var INSTALL_URL = window.SOMACHECK_INSTALL_URL || 'https://apps.apple.com/us/app/somacheck-vibecheck/id6792978184';
   var BRANCH_LONG_LINK_PATH = /^\/a\/key_(?:live|test)_[A-Za-z0-9]+$/;
   var SMART_ROUTE_KEYS = [
     'route_version', 'topic_slug', 'prompt_id', '$canonical_url', '$fallback_url',

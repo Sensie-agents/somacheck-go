@@ -23,7 +23,7 @@ assert.ok(defaultInstallUrl, 'world-vibe/config.js must define a single quoted i
 // The install-config.js file must be the only real source of the literal in
 // the pages that consume it: index.html's inline script and topic.js should
 // read window.SOMACHECK_INSTALL_URL rather than embedding their own copy of
-// the current TestFlight URL as the primary source.
+// the App Store URL as the primary source.
 const topicJs = await readFile(path.join(root, 'world-vibe', 'share', 'topic.js'), 'utf8');
 assert.match(topicJs, /window\.SOMACHECK_INSTALL_URL/, 'topic.js must read the shared install config');
 assert.match(portalHtml, /<script src="\/world-vibe\/config\.js"><\/script>/, 'portal must load the shared install config');

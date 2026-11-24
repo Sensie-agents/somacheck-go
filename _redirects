@@ -10,3 +10,7 @@
 # curated static pages and serves the shared item document for a validated
 # arbitrary slug; item.js then replaces the visible URL with the canonical
 # query form.
+
+# Root: server-side 301 to the World Vibe landing page (replaces the old
+# meta-refresh index.html, which was removed in the same change).
+/  /world-vibe/  301

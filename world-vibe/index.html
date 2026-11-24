@@ -8,13 +8,13 @@
   <meta property="og:title" content="World Vibe - SomaCheck">
   <meta property="og:description" content="World Vibe topics you can open in SomaCheck. Do the 3-second wrist check and see what participants noticed once 5 people join.">
   <meta property="og:image" content="https://go.somacheck.com/world-vibe/assets/og-ai-at-work.png">
-  <meta property="og:url" content="https://go.somacheck.com/world-vibe">
+  <meta property="og:url" content="https://go.somacheck.com/world-vibe/">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="World Vibe - SomaCheck">
   <meta name="twitter:description" content="World Vibe topics you can open in SomaCheck. Do the 3-second wrist check and see what participants noticed once 5 people join.">
   <meta name="twitter:image" content="https://go.somacheck.com/world-vibe/assets/og-ai-at-work.png">
-  <link rel="canonical" href="https://go.somacheck.com/world-vibe">
+  <link rel="canonical" href="https://go.somacheck.com/world-vibe/">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -187,6 +187,8 @@
     .privacy-line { color: var(--faint); font-size: .88rem; }
     .topic-updated { color: var(--faint); font-size: .82rem; font-family: var(--font-mono); }
     .empty, .error { text-align: center; color: var(--muted); padding: 80px 24px; }
+    .about { margin-top: 48px; }
+    .about p { margin: 8px 0 12px; }
     footer { text-align: center; color: var(--faint); font-size: 13px; margin-top: 80px; }
     footer nav { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; }
     .note { background: var(--emerald-soft); border-left: 3px solid var(--emerald); padding: 16px 20px; border-radius: 0 12px 12px 0; color: var(--muted); font-size: .95rem; margin-bottom: 32px; }
@@ -285,11 +287,32 @@
       <p class="last-updated" id="last-updated"></p>
     </section>
 
+    <section class="how about" id="about-world-vibe" aria-labelledby="about-world-vibe-heading">
+      <strong id="about-world-vibe-heading">About World Vibe</strong>
+      <p>World Vibe is a public page from SomaCheck. It gathers quotes from around the web and three curated topics, and shows how the people who checked in landed on each one. Each check-in is a 3-second wrist check done in the SomaCheck iPhone app. Your identity is not shown. Results appear only in aggregate, and a card shows the split only after enough people have joined.</p>
+      <p>It is for anyone curious how a group lands on a statement: readers, teams, and people who already use SomaCheck and want to add their own check-in to the public result. You can browse this page without an account. To add a check-in, install SomaCheck on your iPhone, open a quote or topic from this page, and do the wrist check.</p>
+      <strong>How it works (Feed):</strong>
+      <ol>
+        <li>Browse quotes people are checking their gut against right now.</li>
+        <li>Tap Check in on your phone to add your own 3-second wrist check.</li>
+        <li>Before 3 people join, a card shows only progress.</li>
+        <li>At 3 people, the split appears here for everyone.</li>
+      </ol>
+      <strong>How it works (Topics):</strong>
+      <ol>
+        <li>Pick a statement that catches you.</li>
+        <li>Scan the QR code or tap into SomaCheck to open that exact topic.</li>
+        <li>Do the 3-second wrist check. Your check-in saves to your account and updates the public aggregate.</li>
+        <li>Before five people join, the page shows only progress.</li>
+        <li>After five people join, the World Vibe split appears here for everyone.</li>
+      </ol>
+    </section>
+
     <footer>
       <nav>
-        <a href="/privacy">Privacy</a>
-        <a href="/terms">Terms</a>
-        <a href="/support">Support</a>
+        <a href="https://somacheck.com/privacy">Privacy</a>
+        <a href="https://somacheck.com/terms">Terms</a>
+        <a href="https://somacheck.com/support">Support</a>
       </nav>
       <p>Part of SomaCheck research trials in measurable resilience.</p>
     </footer>
@@ -306,9 +329,8 @@
       var POLL_MS = 7000;
       var DEFAULT_THRESHOLD = 5;
       var SESSION_NONCE_STORAGE_KEY = 'world-vibe-session-nonce';
-      // Runtime seam can cut over to the App Store after publication.
-      // Until then, the working public fallback is TestFlight.
-      var APP_INSTALL_URL = (typeof window !== 'undefined' && window.SOMACHECK_INSTALL_URL) || 'https://testflight.apple.com/join/C4mAH3zz';
+      // Install fallback when config.js is not loaded: the App Store listing id6792978184.
+      var APP_INSTALL_URL = (typeof window !== 'undefined' && window.SOMACHECK_INSTALL_URL) || 'https://apps.apple.com/us/app/somacheck-vibecheck/id6792978184';
       // The immutable, cross-origin Branch host used only for validated one-tap routes.
       // Stable share and QR routes remain on this page's public go.somacheck.com origin.
       var SMART_ROUTE_ORIGIN = 'https://link.somacheck.com';
